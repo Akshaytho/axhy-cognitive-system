@@ -419,23 +419,31 @@ describe('Check Before Edit', async () => {
 // --- Server tool definition ---
 
 describe('Server Tool Definition', async () => {
-  const { TOOL_DEFINITION, handleToolCall } = await import(
+  const { EDIT_TOOL_DEFINITION, PLAN_TOOL_DEFINITION, DONE_TOOL_DEFINITION, handleEditToolCall } = await import(
     join(__dirname, '..', 'src', 'layer-2-guardrail', 'server.mjs')
   );
 
   beforeEach(() => cleanState());
   after(() => cleanState());
 
-  it('should export a valid tool definition', () => {
-    assert.equal(TOOL_DEFINITION.name, 'check_before_edit');
-    assert.ok(TOOL_DEFINITION.inputSchema);
-    assert.ok(TOOL_DEFINITION.inputSchema.properties.intent);
-    assert.ok(TOOL_DEFINITION.inputSchema.properties.file_paths);
-    assert.deepEqual(TOOL_DEFINITION.inputSchema.required, ['intent', 'file_paths']);
+  it('should export a valid edit tool definition', () => {
+    assert.equal(EDIT_TOOL_DEFINITION.name, 'check_before_edit');
+    assert.ok(EDIT_TOOL_DEFINITION.inputSchema);
+    assert.ok(EDIT_TOOL_DEFINITION.inputSchema.properties.intent);
+    assert.ok(EDIT_TOOL_DEFINITION.inputSchema.properties.file_paths);
+    assert.deepEqual(EDIT_TOOL_DEFINITION.inputSchema.required, ['intent', 'file_paths']);
   });
 
-  it('should handle tool call via handleToolCall', async () => {
-    const result = await handleToolCall({
+  it('should export plan and done tool definitions', () => {
+    assert.equal(PLAN_TOOL_DEFINITION.name, 'check_before_plan');
+    assert.ok(PLAN_TOOL_DEFINITION.inputSchema.properties.architecture_evidence);
+    assert.equal(DONE_TOOL_DEFINITION.name, 'check_before_done');
+    assert.ok(DONE_TOOL_DEFINITION.inputSchema.properties.coverage_notes);
+    assert.ok(DONE_TOOL_DEFINITION.inputSchema.required.includes('coverage_notes'));
+  });
+
+  it('should handle edit tool call via handleEditToolCall', async () => {
+    const result = await handleEditToolCall({
       intent: VALID_INTENT,
       file_paths: ['apps/mobile/src/components/Button.tsx'],
     });

@@ -7,23 +7,47 @@ import {
   createPlanApprovalState,
 } from './state-tracker.mjs';
 
-const ARCHITECTURE_INVENTORY_ITEMS = [
-  { key: 'state_machines_checked', label: 'State machines (packages/state-machines/src/)' },
-  { key: 'prisma_schema_checked', label: 'Prisma schema (packages/shared-schema/prisma/schema.prisma)' },
-  { key: 'existing_routes_checked', label: 'Existing backend routes (apps/backend/src/routes/)' },
-  { key: 'mobile_structure_checked', label: 'Mobile app structure (apps/mobile/app/)' },
-  { key: 'locked_docs_checked', label: 'Locked docs (docs/locked/)' },
-  { key: 'tokens_components_checked', label: 'UI tokens/components (packages/ui-tokens/)' },
+const ARCHITECTURE_EVIDENCE_KEYS = [
+  { key: 'state_machines', label: 'State machines (packages/state-machines/src/)', minItems: 0 },
+  { key: 'prisma_models', label: 'Prisma models (packages/shared-schema/prisma/schema.prisma)', minItems: 0 },
+  { key: 'routes', label: 'Backend routes (apps/backend/src/routes/)', minItems: 0 },
+  { key: 'mobile_screens', label: 'Mobile screens (apps/mobile/app/)', minItems: 0 },
+  { key: 'locked_docs', label: 'Locked docs (docs/locked/)', minItems: 1 },
+  { key: 'tokens_components', label: 'UI tokens/components (packages/ui-tokens/)', minItems: 0 },
 ];
+
+function validateEvidence(evidence, key) {
+  if (!Array.isArray(evidence)) return false;
+  if (evidence.length === 0) return true;
+  return evidence.every(item =>
+    item && typeof item === 'object' && typeof item.file === 'string' && item.file.length > 0 && typeof item.relevance === 'string' && item.relevance.length > 0
+  );
+}
 
 export async function checkBeforePlan({
   intent,
   targetPlanFile,
   sourceDocs = [],
   affectedProductArea = '',
+  architectureEvidence = {},
   architectureInventory = {},
   planContent = '',
 }) {
+  const evidence = Object.keys(architectureEvidence).length > 0 ? architectureEvidence : architectureInventory;
+  const usingBooleans = Object.values(evidence).some(v => typeof v === 'boolean');
+
+  if (usingBooleans) {
+    return {
+      allowed: false,
+      reason: 'Booleans are no longer accepted for architecture_evidence. Provide concrete findings.',
+      required_format: {
+        state_machines: [{ file: 'packages/state-machines/src/worker.ts', exports: ['workerMachine'], relevance: 'Worker activation must go through workerMachine transition' }],
+        locked_docs: [{ file: 'docs/locked/chat-behavior-rules.md', key_rules: ['No direct state updates'], relevance: 'Constrains how state changes are implemented' }],
+      },
+      suggestion: 'Read each architecture area, extract file paths and exported names, then provide evidence arrays.',
+    };
+  }
+
   if (!intent || typeof intent !== 'string' || intent.trim().split(/\s+/).length < 20) {
     return {
       allowed: false,
@@ -45,24 +69,35 @@ export async function checkBeforePlan({
     };
   }
 
-  const missingInventory = [];
-  for (const item of ARCHITECTURE_INVENTORY_ITEMS) {
-    if (!architectureInventory[item.key]) {
-      missingInventory.push(item);
+  const missingEvidence = [];
+  const invalidEvidence = [];
+  for (const item of ARCHITECTURE_EVIDENCE_KEYS) {
+    const val = evidence[item.key];
+    if (!val || !Array.isArray(val)) {
+      missingEvidence.push(item);
+    } else if (item.minItems > 0 && val.length < item.minItems) {
+      missingEvidence.push({ ...item, note: `Need at least ${item.minItems} item(s)` });
+    } else if (!validateEvidence(val, item.key)) {
+      invalidEvidence.push({ ...item, note: 'Each item needs { file, relevance } at minimum' });
     }
   }
 
-  if (missingInventory.length > 0) {
+  if (missingEvidence.length > 0 || invalidEvidence.length > 0) {
     return {
       allowed: false,
-      reason: 'Architecture inventory incomplete. Before writing an implementation plan, you MUST check existing architecture.',
-      missing_checks: missingInventory.map(i => ({
+      reason: 'Architecture evidence incomplete. Before writing a plan, you MUST provide concrete findings from reading existing architecture.',
+      missing_evidence: missingEvidence.map(i => ({
         key: i.key,
         label: i.label,
-        instruction: `Read and understand: ${i.label}`,
+        note: i.note || `Read and provide findings: ${i.label}`,
+      })),
+      invalid_evidence: invalidEvidence.map(i => ({
+        key: i.key,
+        label: i.label,
+        note: i.note,
       })),
       existing_machines: getExistingMachines().map(m => ({ name: m.name, file: m.file })),
-      suggestion: 'Read each architecture area listed above, then re-call check_before_plan with all inventory fields set to true.',
+      suggestion: 'Read each architecture area, then provide evidence arrays with { file, exports/key_fields/endpoints, relevance } per item.',
     };
   }
 
@@ -121,7 +156,7 @@ export async function checkBeforePlan({
     editsRemaining: 2,
     sourceDocs,
     sourceWarnings: sourceResult.warnings,
-    architectureInventory,
+    architectureInventory: evidence,
     contentWarnings: contentAudit?.violations?.filter(v => v.severity === 'warning') || [],
     affectedProductArea,
   });
@@ -137,10 +172,10 @@ export async function checkBeforePlan({
     source_warnings: sourceResult.warnings,
     content_warnings: contentAudit?.violations?.filter(v => v.severity === 'warning') || [],
     existing_machines: getExistingMachines().map(m => ({ name: m.name, file: m.file })),
-    architecture_inventory: architectureInventory,
+    architecture_evidence: evidence,
     impact_warnings: (impactResult?.softWarnings || []).map(w => typeof w === 'string' ? w : w.content || w.reason || JSON.stringify(w)),
     rule: 'Persona docs are reference only — never treat as implementation truth without reconciling against existing architecture.',
   };
 }
 
-export { ARCHITECTURE_INVENTORY_ITEMS };
+export { ARCHITECTURE_EVIDENCE_KEYS };

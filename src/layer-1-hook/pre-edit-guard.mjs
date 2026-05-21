@@ -64,9 +64,9 @@ function checkGuardedFile(filePath, stateFile, windowMs, toolName) {
   const approvedFiles = state.approved_files || [];
   const normalizedPath = resolve(filePath);
   const fileApproved = approvedFiles.some(approved => {
-    if (normalizedPath.includes(approved)) return true;
     const normalizedApproved = resolve(REPO_ROOT, approved);
-    return normalizedPath === normalizedApproved || normalizedPath.startsWith(normalizedApproved + '/');
+    if (normalizedPath === normalizedApproved || normalizedPath.startsWith(normalizedApproved + '/')) return true;
+    return normalizedPath.endsWith('/' + approved);
   });
   if (!fileApproved) {
     block(
@@ -146,9 +146,9 @@ async function main() {
   const approvedFiles = state.approved_files || [];
   const normalizedPath = resolve(filePath);
   const fileApproved = approvedFiles.some(approved => {
-    if (normalizedPath.includes(approved)) return true;
     const normalizedApproved = resolve(REPO_ROOT, approved);
-    return normalizedPath === normalizedApproved || normalizedPath.startsWith(normalizedApproved + '/');
+    if (normalizedPath === normalizedApproved || normalizedPath.startsWith(normalizedApproved + '/')) return true;
+    return normalizedPath.endsWith('/' + approved);
   });
   if (!fileApproved) {
     block(

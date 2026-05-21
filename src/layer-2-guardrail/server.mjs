@@ -6,6 +6,7 @@ import { checkBeforeEdit } from './check-before-edit.mjs';
 import { checkBeforePlan } from './check-before-plan.mjs';
 import { checkBeforeDone } from './check-before-done.mjs';
 import { impactCheck, loadRealImpactCheck, isConnected } from './impact-adapter.mjs';
+import { classifyRisk } from '../layer-1-hook/risk-classifier.mjs';
 
 const READ_STATE_FILE = '/tmp/axhy-read-state.json';
 const READ_WINDOW_MS = 10 * 60 * 1000;
@@ -46,7 +47,7 @@ const EDIT_TOOL_DEFINITION = {
 
 const PLAN_TOOL_DEFINITION = {
   name: 'check_before_plan',
-  description: 'Call this BEFORE writing any plan, sprint plan, implementation plan, persona doc, or handoff file. Requires architecture inventory (you must have Read the existing state machines, Prisma schema, routes, mobile structure, locked docs, and UI tokens). Validates source hierarchy — persona docs are NOT implementation truth. Audits plan content for anti-patterns (direct DB updates, enum fields where machines exist).',
+  description: 'Call this BEFORE writing any plan, sprint plan, implementation plan, persona doc, or handoff file. Requires architecture evidence (concrete findings from reading state machines, Prisma schema, routes, mobile structure, locked docs, and UI tokens). Validates source hierarchy — persona docs are NOT implementation truth. Audits plan content for anti-patterns (direct DB updates, enum fields where machines exist).',
   inputSchema: {
     type: 'object',
     properties: {
@@ -67,24 +68,24 @@ const PLAN_TOOL_DEFINITION = {
         type: 'string',
         description: 'Which product area: worker, supervisor, admin, backend, shared.',
       },
-      architecture_inventory: {
+      architecture_evidence: {
         type: 'object',
         properties: {
-          state_machines_checked: { type: 'boolean', description: 'Read packages/state-machines/src/ and understand existing machines' },
-          prisma_schema_checked: { type: 'boolean', description: 'Read Prisma schema and understand existing tables/relations' },
-          existing_routes_checked: { type: 'boolean', description: 'Read existing backend routes in the affected area' },
-          mobile_structure_checked: { type: 'boolean', description: 'Read mobile app structure and existing screens' },
-          locked_docs_checked: { type: 'boolean', description: 'Read relevant locked docs in docs/locked/' },
-          tokens_components_checked: { type: 'boolean', description: 'Read UI tokens and existing shared components' },
+          state_machines: { type: 'array', items: { type: 'object' }, description: 'Findings from packages/state-machines/src/ — each item: { file, exports, relevance }' },
+          prisma_models: { type: 'array', items: { type: 'object' }, description: 'Findings from Prisma schema — each item: { file, key_fields, relevance }' },
+          routes: { type: 'array', items: { type: 'object' }, description: 'Findings from backend routes — each item: { file, endpoints, relevance }' },
+          mobile_screens: { type: 'array', items: { type: 'object' }, description: 'Findings from mobile app structure — each item: { file, relevance }' },
+          locked_docs: { type: 'array', items: { type: 'object' }, description: 'Findings from docs/locked/ — each item: { file, key_rules, relevance }. At least 1 required.' },
+          tokens_components: { type: 'array', items: { type: 'object' }, description: 'Findings from UI tokens/components — each item: { file, relevance }' },
         },
-        description: 'Checklist of existing architecture you have Read. ALL must be true before writing a plan.',
+        description: 'Concrete findings from reading existing architecture. Each key is an evidence array with { file, relevance } per item. Empty arrays allowed except locked_docs (min 1).',
       },
       plan_content: {
         type: 'string',
         description: 'Optional: the plan content you intend to write, for pre-write anti-pattern scanning.',
       },
     },
-    required: ['intent', 'target_plan_file', 'source_docs', 'architecture_inventory'],
+    required: ['intent', 'target_plan_file', 'source_docs', 'architecture_evidence'],
   },
 };
 
@@ -104,7 +105,13 @@ export async function handleEditToolCall({ intent, file_paths, change_type, answ
   let impactResult = null;
   if (intent && !answered_question) {
     try {
-      const result = await impactCheck(intent);
+      const highestRisk = (file_paths || []).reduce((max, fp) => {
+        const { level } = classifyRisk(fp);
+        if (level === 'high') return 'high';
+        if (level === 'medium' && max !== 'high') return 'medium';
+        return max;
+      }, 'low');
+      const result = await impactCheck(intent, undefined, highestRisk);
       impactResult = {
         hardBlocks: (result.hardBlocks || []).map(b => typeof b === 'string' ? b : b.content || JSON.stringify(b)),
         warnings: (result.softWarnings || []).map(w => typeof w === 'string' ? w : w.content || JSON.stringify(w)),
@@ -137,6 +144,7 @@ export async function handlePlanToolCall(args) {
     targetPlanFile: args.target_plan_file,
     sourceDocs: args.source_docs || [],
     affectedProductArea: args.affected_product_area || '',
+    architectureEvidence: args.architecture_evidence || {},
     architectureInventory: args.architecture_inventory || {},
     planContent: args.plan_content || '',
   });
@@ -177,8 +185,12 @@ const DONE_TOOL_DEFINITION = {
         type: 'boolean',
         description: 'Whether all tests for affected packages passed green.',
       },
+      coverage_notes: {
+        type: 'string',
+        description: 'Which sprint plan items this slice covers, what source requirements are satisfied, and any known gaps remaining (20+ chars).',
+      },
     },
-    required: ['intent', 'slice_name', 'done_memo_file', 'slice_files', 'screenshots_taken', 'typecheck_passed', 'tests_passed'],
+    required: ['intent', 'slice_name', 'done_memo_file', 'slice_files', 'screenshots_taken', 'typecheck_passed', 'tests_passed', 'coverage_notes'],
   },
 };
 
@@ -191,6 +203,7 @@ export async function handleDoneToolCall(args) {
     screenshotsTaken: args.screenshots_taken || false,
     typecheckPassed: args.typecheck_passed || false,
     testsPassed: args.tests_passed || false,
+    coverageNotes: args.coverage_notes || '',
   });
 }
 

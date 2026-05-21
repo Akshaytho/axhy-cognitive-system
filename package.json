@@ -11,7 +11,10 @@
     "test:layer3": "node --test tests/layer-3-compaction.test.mjs",
     "test:firewall": "node --test tests/memory-firewall.test.mjs",
     "test:corruption": "node --test tests/anti-corruption.test.mjs",
-    "test:integration": "node --test tests/integration.test.mjs"
+    "test:integration": "node --test tests/integration.test.mjs",
+    "verify": "node src/verify-install.mjs",
+    "test:plan-content": "node --test src/layer-2-guardrail/plan-content-auditor.test.mjs",
+    "test:quality-gate": "node -e \"import('./src/layer-2-guardrail/quality-gate.mjs').then(({gradeFindings})=>{const r=gradeFindings([]);console.log(r.pass?'PASS':'FAIL',r.grade);process.exit(r.pass?0:1)})\""
   },
   "engines": {
     "node": ">=20"

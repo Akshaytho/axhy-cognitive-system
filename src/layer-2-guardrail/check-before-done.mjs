@@ -32,6 +32,7 @@ export async function checkBeforeDone({
   screenshotsTaken = false,
   typecheckPassed = false,
   testsPassed = false,
+  coverageNotes = '',
   manualChecks = {},
 }) {
   if (!intent || typeof intent !== 'string' || intent.trim().split(/\s+/).length < 15) {
@@ -78,6 +79,13 @@ export async function checkBeforeDone({
       'You MUST capture screenshots of every screen/flow before declaring done. ' +
       'Visual verification proves the feature works from a user perspective — ' +
       'typecheck and tests only prove code correctness, not feature correctness.'
+    );
+  }
+
+  if (!coverageNotes || coverageNotes.trim().length < 20) {
+    preflightFailures.push(
+      'Missing coverage notes. Describe which sprint plan items this slice covers, ' +
+      'what source requirements are satisfied, and any known gaps remaining.'
     );
   }
 
