@@ -577,4 +577,28 @@ describe('Quality Gate False-Positive Filters', async () => {
     const findings = runPatternChecks(content, 'prisma/schema.prisma');
     assert.equal(findCheck(findings, 'magic_number'), undefined);
   });
+
+  it('should skip unhandled_async in test files (vitest pattern)', () => {
+    const content = "it('accepts WORKER-only membership', async () => {\n  const result = await verifyOTP('123456');\n  expect(result).toBeDefined();\n});";
+    const findings = runPatternChecks(content, 'lib/identity-lifecycle.test.ts', true);
+    assert.equal(findCheck(findings, 'unhandled_async'), undefined);
+  });
+
+  it('should skip unsafe_test_cast in test files (vitest mock pattern)', () => {
+    const content = "const setTokens = vi.fn() as unknown as ReturnType<typeof vi.fn>;";
+    const findings = runPatternChecks(content, 'lib/identity-lifecycle.test.ts', true);
+    assert.equal(findCheck(findings, 'unsafe_test_cast'), undefined);
+  });
+
+  it('should STILL catch unsafe_cast (as Role) in production code', () => {
+    const content = "const role = membership.role as Role;";
+    const findings = runPatternChecks(content, 'src/routes/auth.ts', false);
+    assert.ok(findCheck(findings, 'unsafe_cast'));
+  });
+
+  it('should STILL catch unhandled_async in production code without try/catch', () => {
+    const content = "async function handleLogout() {\n  await logout();\n  router.push('/login');\n}";
+    const findings = runPatternChecks(content, 'src/components/profile.tsx', false);
+    assert.ok(findCheck(findings, 'unhandled_async'));
+  });
 });

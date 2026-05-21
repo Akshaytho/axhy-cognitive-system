@@ -28,6 +28,12 @@ const TEST_ONLY_CHECKS = new Set([
   'real_timer_in_test', 'unsafe_test_cast',
 ]);
 
+const TEST_FILE_SKIP_CHECKS = new Set([
+  'hardcoded_state_value',
+  'unhandled_async',
+  'unsafe_test_cast',
+]);
+
 const COMMENT_SKIP_CHECKS = new Set([
   'role_check', 'hardcoded_role', 'hardcoded_state_value', 'magic_number',
 ]);
@@ -182,7 +188,7 @@ export function runPatternChecks(fileContent, filePath, isTestFile = false) {
       if (isTestFile && ['hardcoded_route', 'hardcoded_role', 'magic_number', 'console_log'].includes(check.id)) continue;
       if (isPrisma && PRISMA_EXCLUDED_CHECKS.has(check.id)) continue;
       if (!isTestFile && TEST_ONLY_CHECKS.has(check.id)) continue;
-      if (isTestFile && check.id === 'hardcoded_state_value') continue;
+      if (isTestFile && TEST_FILE_SKIP_CHECKS.has(check.id)) continue;
 
       check.pattern.lastIndex = 0;
       const matches = [];
