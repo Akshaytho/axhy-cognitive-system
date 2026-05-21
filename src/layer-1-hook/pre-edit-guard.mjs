@@ -19,10 +19,14 @@
  */
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { resolve } from 'node:path';
 import { classifyRisk, isGuardrailOptional } from './risk-classifier.mjs';
 
-const STATE_FILE = '/tmp/axhy-guardrail-state.json';
-const READ_STATE_FILE = '/tmp/axhy-read-state.json';
+const REPO_ROOT = process.env.AXHY_REPO_ROOT || process.cwd();
+const REPO_HASH = createHash('md5').update(REPO_ROOT).digest('hex').slice(0, 8);
+const STATE_FILE = `/tmp/axhy-${REPO_HASH}-guardrail-state.json`;
+const READ_STATE_FILE = `/tmp/axhy-${REPO_HASH}-read-state.json`;
 const APPROVAL_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
 const READ_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
 
@@ -101,9 +105,14 @@ async function main() {
     return;
   }
 
-  // 3. Check file is in approved_files
+  // 3. Check file is in approved_files (normalized path matching)
   const approvedFiles = state.approved_files || [];
-  const fileApproved = approvedFiles.some(approved => filePath.includes(approved));
+  const normalizedPath = resolve(filePath);
+  const fileApproved = approvedFiles.some(approved => {
+    if (normalizedPath.includes(approved)) return true;
+    const normalizedApproved = resolve(REPO_ROOT, approved);
+    return normalizedPath === normalizedApproved || normalizedPath.startsWith(normalizedApproved + '/');
+  });
   if (!fileApproved) {
     block(
       `⛔ BLOCKED: File not in approved scope.\n` +

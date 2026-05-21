@@ -15,6 +15,8 @@ const HIGH_RISK_PATTERNS = [
   /\.env/,
   /memory-firewall/,
   /anti-corruption/,
+  /\.mcp\.json$/,
+  /\.claude\/settings.*\.json$/,
 ];
 
 const MEDIUM_RISK_PATTERNS = [
@@ -35,8 +37,6 @@ const GUARDRAIL_OPTIONAL_PATTERNS = [
   /README\.md$/,
   /docs\/audits\/.*\.md$/,
   /docs\/done-memos\/.*\.md$/,
-  /\.mcp\.json$/,
-  /\.claude\/settings.*\.json$/,
 ];
 
 export function classifyRisk(filePath) {

@@ -19,13 +19,16 @@ Hates pre-deferred features. Prefers plain English + real-world reasoning.
 - Locked docs: `axhy-v3/docs/locked/` (12 constitutional docs, never modify without founder)
 - Handoff: `axhy-v3/handoff/NEXT_SESSION.md` + `axhy-v3/handoff/STATUS.md`
 
-## On Session Start
+## On Session Start (lean boot — no context bloat)
 1. Run audit: `pnpm --filter @axhy/ai-tools run audit`
-2. Read v3 memory + feedback files
-3. Read master plan
-4. Read handoff
-5. Acknowledge the 4 hard discipline gates
-6. Summarize where we left off
+2. Read v3 memory INDEX only (`MEMORY_V3.md`) — do NOT read all feedback files at boot
+3. Read handoff (`NEXT_SESSION.md` + `STATUS.md`)
+4. Summarize where we left off
+
+Do NOT read the full master plan at boot. Do NOT read all feedback_*.md files.
+Product rules and locked doc content load ON DEMAND through the guardrail's
+impactCheck when you're about to edit relevant files. This prevents the old
+context-bloat problem where 80k+ words of docs filled the context window.
 
 ## Hard Rules
 - Don't pre-defer features

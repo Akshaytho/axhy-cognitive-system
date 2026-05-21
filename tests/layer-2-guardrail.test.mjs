@@ -1,12 +1,16 @@
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, unlinkSync, readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
+
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const STATE_FILE = '/tmp/axhy-guardrail-state.json';
-const READ_STATE_FILE = '/tmp/axhy-read-state.json';
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const REPO_HASH = createHash('md5').update(REPO_ROOT).digest('hex').slice(0, 8);
+const STATE_FILE = `/tmp/axhy-${REPO_HASH}-guardrail-state.json`;
+const READ_STATE_FILE = `/tmp/axhy-${REPO_HASH}-read-state.json`;
 
 function cleanState() {
   if (existsSync(STATE_FILE)) unlinkSync(STATE_FILE);

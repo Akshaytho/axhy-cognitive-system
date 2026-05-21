@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 
-const READ_STATE_FILE = '/tmp/axhy-read-state.json';
+const REPO_ROOT = process.env.AXHY_REPO_ROOT || process.cwd();
+const REPO_HASH = createHash('md5').update(REPO_ROOT).digest('hex').slice(0, 8);
+const READ_STATE_FILE = `/tmp/axhy-${REPO_HASH}-read-state.json`;
 
 async function main() {
   let input;

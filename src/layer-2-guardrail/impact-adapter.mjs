@@ -28,9 +28,9 @@ export async function loadRealImpactCheck() {
   }
 }
 
-export async function impactCheck(changeDescription, persona) {
+export async function impactCheck(changeDescription, persona, riskLevel = 'low') {
   if (isBrainRebuilding()) {
-    const result = fallbackResult('Brain is rebuilding — using cached/fallback results');
+    const result = fallbackResult('Brain is rebuilding — using cached/fallback results', riskLevel);
     result._brainRebuilding = true;
     return result;
   }
@@ -39,10 +39,10 @@ export async function impactCheck(changeDescription, persona) {
     try {
       return await realImpactCheck(changeDescription, persona);
     } catch (err) {
-      return fallbackResult(`impactCheck DB error: ${err.message}`);
+      return fallbackResult(`impactCheck DB error: ${err.message}`, riskLevel);
     }
   }
-  return fallbackResult('No DB connection — running without vector search');
+  return fallbackResult('No DB connection — running without vector search', riskLevel);
 }
 
 export async function vectorSearch(query, options = {}) {
@@ -56,11 +56,26 @@ export async function vectorSearch(query, options = {}) {
   return [];
 }
 
-function fallbackResult(reason) {
+function fallbackResult(reason, riskLevel = 'low') {
+  if (riskLevel === 'high' || riskLevel === 'medium') {
+    return {
+      hasConflicts: true,
+      hardBlocks: [{
+        rule: 'Product Brain unavailable',
+        reason: `${reason}. Cannot safely approve ${riskLevel}-risk edit without vector search.`,
+      }],
+      softWarnings: [],
+      staleChunks: [],
+      allRelevant: [],
+      _fallback: true,
+      _fallbackReason: reason,
+      _blocked: true,
+    };
+  }
   return {
     hasConflicts: false,
     hardBlocks: [],
-    softWarnings: [],
+    softWarnings: [{ rule: 'Product Brain unavailable', reason }],
     staleChunks: [],
     allRelevant: [],
     _fallback: true,
