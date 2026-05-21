@@ -26,13 +26,29 @@ const APPROVAL_WINDOW_MS = 15 * 60 * 1000;
 const DONE_APPROVAL_WINDOW_MS = 20 * 60 * 1000;
 const READ_WINDOW_MS = 10 * 60 * 1000;
 
+const WORKSPACE_ROOTS = [
+  '/Users/thotaakshay/eclean_workspace',
+  '/Users/thotaakshay/eclean_workspace/axhy-v3',
+  '/Users/thotaakshay/eclean_workspace/axhy-cognitive-system',
+];
+
+function allHashes() {
+  const set = new Set([REPO_HASH]);
+  for (const r of WORKSPACE_ROOTS) set.add(createHash('md5').update(r).digest('hex').slice(0, 8));
+  return [...set];
+}
+
 function readJsonState(file) {
   if (!existsSync(file)) return null;
   try { return JSON.parse(readFileSync(file, 'utf-8')); } catch { return null; }
 }
 
 function writeJsonState(file, state) {
-  writeFileSync(file, JSON.stringify(state, null, 2));
+  const suffix = file.replace(/.*axhy-[a-f0-9]+-/, '');
+  const json = JSON.stringify(state, null, 2);
+  for (const h of allHashes()) {
+    try { writeFileSync(`/tmp/axhy-${h}-${suffix}`, json); } catch {}
+  }
 }
 
 function wasFileReadRecently(filePath) {

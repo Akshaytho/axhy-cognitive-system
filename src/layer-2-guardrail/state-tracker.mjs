@@ -9,13 +9,32 @@ const READ_STATE_FILE = `/tmp/axhy-${REPO_HASH}-read-state.json`;
 const PLAN_STATE_FILE = `/tmp/axhy-${REPO_HASH}-plan-guardrail-state.json`;
 const DONE_STATE_FILE = `/tmp/axhy-${REPO_HASH}-done-guardrail-state.json`;
 
+const WORKSPACE_ROOTS = [
+  '/Users/thotaakshay/eclean_workspace',
+  '/Users/thotaakshay/eclean_workspace/axhy-v3',
+  '/Users/thotaakshay/eclean_workspace/axhy-cognitive-system',
+];
+
+function allHashes() {
+  const set = new Set([REPO_HASH]);
+  for (const r of WORKSPACE_ROOTS) set.add(createHash('md5').update(r).digest('hex').slice(0, 8));
+  return [...set];
+}
+
+function writeToAll(suffix, content) {
+  const json = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
+  for (const h of allHashes()) {
+    try { writeFileSync(`/tmp/axhy-${h}-${suffix}`, json); } catch {}
+  }
+}
+
 export function readGuardrailState() {
   if (!existsSync(STATE_FILE)) return null;
   try { return JSON.parse(readFileSync(STATE_FILE, 'utf-8')); } catch { return null; }
 }
 
 export function writeGuardrailState(state) {
-  writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+  writeToAll('guardrail-state.json', state);
 }
 
 export function recordFileRead(filePath) {
@@ -24,7 +43,7 @@ export function recordFileRead(filePath) {
     try { reads = JSON.parse(readFileSync(READ_STATE_FILE, 'utf-8')); } catch {}
   }
   reads[filePath] = Date.now();
-  writeFileSync(READ_STATE_FILE, JSON.stringify(reads));
+  writeToAll('read-state.json', reads);
 }
 
 export function createApprovalState({
@@ -60,7 +79,7 @@ export function readPlanGuardrailState() {
 }
 
 export function writePlanGuardrailState(state) {
-  writeFileSync(PLAN_STATE_FILE, JSON.stringify(state, null, 2));
+  writeToAll('plan-guardrail-state.json', state);
 }
 
 export function createPlanApprovalState({
@@ -86,7 +105,7 @@ export function readDoneGuardrailState() {
 }
 
 export function writeDoneGuardrailState(state) {
-  writeFileSync(DONE_STATE_FILE, JSON.stringify(state, null, 2));
+  writeToAll('done-guardrail-state.json', state);
 }
 
 export function createDoneApprovalState({
