@@ -34,7 +34,7 @@ export function generateNextQuestion({ filePath, intent, riskLevel, fileWasRead,
     });
   }
 
-  if (intent && /\b(delete|remove|drop|truncate)\b/i.test(intent)) {
+  if (intent && /\b(delete|remove)\s+(file|table|column|database|db|record|row|model|endpoint|route|migration)\b/i.test(intent)) {
     questions.push({
       current_uncertainty: 'Destructive operation detected in intent.',
       highest_risk_assumption: 'That nothing depends on the thing being removed.',
@@ -43,9 +43,18 @@ export function generateNextQuestion({ filePath, intent, riskLevel, fileWasRead,
       stop_condition: 'All references have been checked and none will break.',
       requires_answer: true,
     });
+  } else if (intent && /\b(drop\s+(?:table|column|index|constraint|database)|truncate\s+(?:table)?)\b/i.test(intent)) {
+    questions.push({
+      current_uncertainty: 'Destructive DB operation detected in intent.',
+      highest_risk_assumption: 'That nothing depends on the thing being dropped.',
+      next_best_question: 'What depends on the code/data you\'re about to remove? Have you checked all callers/references?',
+      how_to_answer: 'search_memory',
+      stop_condition: 'All references have been checked and none will break.',
+      requires_answer: true,
+    });
   }
 
-  if (intent && /\b(migration|schema|column|table|index)\b/i.test(intent)) {
+  if (intent && /\b(migration|schema\s+change|alter\s+table|add\s+column|drop\s+column)\b/i.test(intent)) {
     questions.push({
       current_uncertainty: 'Database schema change detected.',
       highest_risk_assumption: 'That the migration is reversible and won\'t corrupt existing data.',

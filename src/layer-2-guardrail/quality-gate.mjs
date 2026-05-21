@@ -17,7 +17,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-const AXHY_V3_ROOT = process.env.AXHY_V3_ROOT || '/Users/thotaakshay/eclean_workspace/axhy-v3';
+const AXHY_V3_ROOT = process.env.AXHY_V3_ROOT || (process.env.HOME + '/eclean_workspace/axhy-v3');
 
 const PRISMA_EXCLUDED_CHECKS = new Set([
   'role_check', 'unsafe_cast', 'no_company_filter', 'no_input_validation',

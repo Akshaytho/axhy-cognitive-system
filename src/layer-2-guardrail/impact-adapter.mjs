@@ -20,7 +20,8 @@ function isBrainRebuilding() {
 
 export async function loadRealImpactCheck() {
   try {
-    const mod = await import('/Users/thotaakshay/eclean_workspace/axhy-v3/packages/ai-tools/src/vector-knowledge.ts');
+    const axhyV3Root = process.env.AXHY_V3_ROOT || (process.env.HOME + '/eclean_workspace/axhy-v3');
+    const mod = await import(axhyV3Root + '/packages/ai-tools/src/vector-knowledge.ts');
     realImpactCheck = mod.impactCheck;
     realVectorSearch = mod.vectorSearch;
     return true;

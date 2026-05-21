@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { resolvePersona } from '../personas/resolver.mjs';
 
-const MEMORY_BASE = '/Users/thotaakshay/.claude/projects/-Users-thotaakshay-eclean-workspace/memory';
+const MEMORY_BASE = (process.env.HOME || '/Users/thotaakshay') + '/.claude/projects/-Users-thotaakshay-eclean-workspace/memory';
 const V3_MEMORY = join(MEMORY_BASE, 'v3');
 
 const ALWAYS_LOAD = [
@@ -35,7 +35,7 @@ export function getAlwaysLoadFiles() {
 }
 
 export function getPersonaFiles(intent, filePaths = []) {
-  const personaDir = '/Users/thotaakshay/eclean_workspace/axhy-v3/docs/personas';
+  const personaDir = (process.env.AXHY_V3_ROOT || (process.env.HOME + '/eclean_workspace/axhy-v3')) + '/docs/personas';
   if (!existsSync(personaDir)) return [];
 
   const resolved = resolvePersona(intent, filePaths);

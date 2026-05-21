@@ -4,19 +4,19 @@ const REQUIRED_ASPECTS = [
   {
     name: 'purpose',
     patterns: [
-      /\b(to |in order to |so that |because |for |adding |removing |changing |fixing |updating |implementing |creating )/i,
+      /\b(to|in order to|so that|because|for|adding|removing|changing|fixing|updating|implementing|creating)\b/i,
     ],
   },
   {
     name: 'affected_behavior',
     patterns: [
-      /\b(will |should |changes? |affects? |modif|updat|alter|impact|breaks? |enables? |disables? )/i,
+      /\b(will|should|changes?|affects?|modif\w*|updat\w*|alter\w*|impacts?|enables?|disables?)\b/i,
     ],
   },
   {
     name: 'risk',
     patterns: [
-      /\b(risk|careful|danger|break|regression|side.?effect|concern|worry|caveat|assumption|depend|migration)/i,
+      /\b(risk\w*|careful|danger\w*|regression|side.?effect|concern|caveat|assumption|depend\w*|migration|break(?:s|ing)?(?:\s+\w+)?(?:\s+if|\s+when)?)\b/i,
     ],
   },
 ];

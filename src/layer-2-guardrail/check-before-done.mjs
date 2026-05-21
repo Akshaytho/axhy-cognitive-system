@@ -21,7 +21,7 @@ import {
   createDoneApprovalState,
 } from './state-tracker.mjs';
 
-const AXHY_V3_ROOT = process.env.AXHY_V3_ROOT || '/Users/thotaakshay/eclean_workspace/axhy-v3';
+const AXHY_V3_ROOT = process.env.AXHY_V3_ROOT || (process.env.HOME + '/eclean_workspace/axhy-v3');
 
 function checkFilesCommitted(sliceFiles) {
   try {
@@ -42,7 +42,16 @@ function checkFilesCommitted(sliceFiles) {
   }
 }
 
-const UI_EXTENSIONS = ['.tsx', '.ts', '.jsx', '.js'];
+const UI_EXTENSIONS = ['.tsx', '.jsx'];
+const FRONTEND_PATH_MARKERS = ['apps/worker', 'apps/supervisor', 'apps/admin', 'components/', 'screens/', 'pages/'];
+
+function isUIFile(filePath) {
+  if (filePath.includes('.test.')) return false;
+  const ext = filePath.slice(filePath.lastIndexOf('.'));
+  if (UI_EXTENSIONS.includes(ext)) return true;
+  if ((ext === '.ts' || ext === '.js') && FRONTEND_PATH_MARKERS.some(m => filePath.includes(m))) return true;
+  return false;
+}
 
 export async function checkBeforeDone({
   intent,
@@ -94,7 +103,7 @@ export async function checkBeforeDone({
     preflightFailures.push('Tests have not passed — run all tests for affected packages and confirm green.');
   }
 
-  const hasUIFiles = sliceFiles.some(f => UI_EXTENSIONS.some(ext => f.endsWith(ext)) && !f.includes('.test.'));
+  const hasUIFiles = sliceFiles.some(f => isUIFile(f));
   if (hasUIFiles && !screenshotsTaken) {
     preflightFailures.push(
       'UI files in slice but no screenshots taken. ' +

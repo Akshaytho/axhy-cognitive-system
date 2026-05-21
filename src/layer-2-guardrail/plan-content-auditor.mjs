@@ -6,7 +6,7 @@
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-const AXHY_V3_ROOT = process.env.AXHY_V3_ROOT || '/Users/thotaakshay/eclean_workspace/axhy-v3';
+const AXHY_V3_ROOT = process.env.AXHY_V3_ROOT || (process.env.HOME + '/eclean_workspace/axhy-v3');
 const STATE_MACHINES_DIR = resolve(AXHY_V3_ROOT, 'packages/state-machines/src');
 
 const ANTI_PATTERNS = [
