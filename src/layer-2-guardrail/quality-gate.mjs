@@ -236,18 +236,46 @@ export function runPatternChecks(fileContent, filePath, isTestFile = false) {
   return findings;
 }
 
+export function countStubChecks() {
+  let total = 0;
+  let stubs = 0;
+  for (const cat of CHECK_CATEGORIES) {
+    for (const check of cat.checks) {
+      total++;
+      if (!check.pattern) stubs++;
+    }
+  }
+  return { total, stubs, active: total - stubs };
+}
+
 export function gradeFindings(findings) {
   const criticals = findings.filter(f => f.weight === 'critical').length;
   const highs = findings.filter(f => f.weight === 'high').length;
   const mediums = findings.filter(f => f.weight === 'medium').length;
+  const { total, stubs, active } = countStubChecks();
 
-  if (criticals >= 3) return { grade: 'L1', label: 'Junior', pass: false, reason: `${criticals} critical issues — fundamental gaps at trust boundaries` };
-  if (criticals >= 1) return { grade: 'L2', label: 'Mid-level', pass: false, reason: `${criticals} critical + ${highs} high issues — solid start but not production-safe` };
-  if (highs >= 4) return { grade: 'L2', label: 'Mid-level', pass: false, reason: `${highs} high issues — needs hardening before production` };
-  if (highs >= 1) return { grade: 'L3', label: 'Senior', pass: true, reason: `${highs} high issues remaining — production-capable with known risks` };
-  if (mediums >= 3) return { grade: 'L3', label: 'Senior', pass: true, reason: `Clean on critical/high but ${mediums} medium issues — solid work` };
-  if (mediums >= 1) return { grade: 'L4', label: 'Principal', pass: true, reason: `Only ${mediums} medium issues — exemplary engineering` };
-  return { grade: 'L5', label: 'Distinguished', pass: true, reason: 'Zero issues detected — exceptional quality' };
+  let grade;
+  if (criticals >= 3) grade = { grade: 'L1', label: 'Junior', pass: false, reason: `${criticals} critical issues — fundamental gaps at trust boundaries` };
+  else if (criticals >= 1) grade = { grade: 'L2', label: 'Mid-level', pass: false, reason: `${criticals} critical + ${highs} high issues — solid start but not production-safe` };
+  else if (highs >= 4) grade = { grade: 'L2', label: 'Mid-level', pass: false, reason: `${highs} high issues — needs hardening before production` };
+  else if (highs >= 1) grade = { grade: 'L3', label: 'Senior', pass: true, reason: `${highs} high issues remaining — production-capable with known risks` };
+  else if (mediums >= 3) grade = { grade: 'L3', label: 'Senior', pass: true, reason: `Clean on critical/high but ${mediums} medium issues — solid work` };
+  else if (mediums >= 1) grade = { grade: 'L4', label: 'Principal', pass: true, reason: `Only ${mediums} medium issues — exemplary engineering` };
+  else grade = { grade: 'L5', label: 'Distinguished', pass: true, reason: 'Zero issues detected — exceptional quality' };
+
+  if (stubs > 0) {
+    grade.checksRun = active;
+    grade.checksStubbed = stubs;
+    grade.checksTotal = total;
+    grade.stubWarning = `${stubs}/${total} checks are stubs (no pattern) — grade based on ${active} active checks only`;
+    if (grade.grade === 'L5' || grade.grade === 'L4') {
+      grade.grade = grade.grade === 'L5' ? 'L4' : 'L3';
+      grade.label = grade.grade === 'L4' ? 'Principal' : 'Senior';
+      grade.reason += ` (capped — ${stubs} checks not yet implemented)`;
+    }
+  }
+
+  return grade;
 }
 
 export function auditSliceFiles(filePaths) {
@@ -255,7 +283,9 @@ export function auditSliceFiles(filePaths) {
 
   for (const fp of filePaths) {
     const fullPath = fp.startsWith('/') ? fp : resolve(AXHY_V3_ROOT, fp);
-    if (!existsSync(fullPath)) continue;
+    if (!existsSync(fullPath)) {
+      continue;
+    }
 
     const content = readFileSync(fullPath, 'utf-8');
     const isTest = /\.(test|spec)\.(ts|tsx|js|mjs)$/.test(fp);

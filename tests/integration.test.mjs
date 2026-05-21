@@ -158,7 +158,7 @@ describe('Integration: Layer 2 approval → Layer 1 enforcement', async () => {
 
   it('Flow 5: Guardrail-optional files bypass everything', () => {
     // No Layer 2 call, no read state — should still allow
-    const result = runGuard('docs/plans/my-plan.md');
+    const result = runGuard('docs/research/analysis.md');
     assert.equal(result.exitCode, 0);
   });
 

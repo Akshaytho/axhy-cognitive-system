@@ -17,7 +17,7 @@ const ANTI_PATTERNS = [
   },
   {
     name: 'direct_status_update',
-    pattern: /\b(direct\s+(?:DB|database|status)\s+(?:update|write|set))\b/gi,
+    pattern: /\b(direct\s+(?:DB|database)\s+(?:\w+\s+){0,2}(?:update|write|set))\b/gi,
     message: 'Mentions direct DB/status update. Status mutations must go through state machine transition functions.',
   },
   {

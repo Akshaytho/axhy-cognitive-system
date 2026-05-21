@@ -1,3 +1,4 @@
+
 import { classifyRisk } from '../layer-1-hook/risk-classifier.mjs';
 import { validateIntent } from './intent-validator.mjs';
 import { suggestMaturity } from './maturity-selector.mjs';
@@ -54,6 +55,15 @@ export function checkBeforeEdit({
   const rules = impactCheckResult?.rules || [];
 
   if (hardBlocks.length > 0) {
+    writeGuardrailState(createApprovalState({
+      intent,
+      approvedFiles: [],
+      editsRemaining: 0,
+      requiresAnswer: false,
+      confidence: 'blocked',
+      confidenceReason: 'Hard blocks from locked constraints.',
+      hardBlocks,
+    }));
     return {
       allowed: false,
       reason: 'Hard blocks from locked constraints.',
@@ -83,10 +93,7 @@ export function checkBeforeEdit({
   const requiresAnswer = nextQuestions?.requires_answer || false;
   const primaryQuestion = nextQuestions?.primary?.next_best_question || null;
 
-  const approvedFiles = filePaths.map(fp => {
-    const parts = fp.split('/');
-    return parts.length > 2 ? parts.slice(-2).join('/') : fp;
-  });
+  const approvedFiles = filePaths;
 
   const state = createApprovalState({
     intent,

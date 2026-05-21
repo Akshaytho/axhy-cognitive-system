@@ -1,8 +1,3 @@
-/**
- * Source hierarchy for plan validation.
- * Lower tier number = higher authority.
- * Persona docs (tier 4) are NOT implementation truth.
- */
 
 const SOURCE_TIERS = [
   { tier: 1, name: 'locked_docs', patterns: [/docs\/locked\//] },

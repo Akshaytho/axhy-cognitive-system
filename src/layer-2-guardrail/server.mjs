@@ -2,13 +2,16 @@
 
 import { createInterface } from 'node:readline';
 import { existsSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { checkBeforeEdit } from './check-before-edit.mjs';
 import { checkBeforePlan } from './check-before-plan.mjs';
 import { checkBeforeDone } from './check-before-done.mjs';
 import { impactCheck, loadRealImpactCheck, isConnected } from './impact-adapter.mjs';
 import { classifyRisk } from '../layer-1-hook/risk-classifier.mjs';
 
-const READ_STATE_FILE = '/tmp/axhy-read-state.json';
+const REPO_ROOT = process.env.AXHY_REPO_ROOT || process.cwd();
+const REPO_HASH = createHash('md5').update(REPO_ROOT).digest('hex').slice(0, 8);
+const READ_STATE_FILE = `/tmp/axhy-${REPO_HASH}-read-state.json`;
 const READ_WINDOW_MS = 10 * 60 * 1000;
 
 const EDIT_TOOL_DEFINITION = {

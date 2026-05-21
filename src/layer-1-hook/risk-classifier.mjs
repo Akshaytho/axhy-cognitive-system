@@ -1,3 +1,4 @@
+
 const HIGH_RISK_PATTERNS = [
   /CLAUDE\.md$/,
   /CORE_MIND\.md$/,
@@ -51,25 +52,33 @@ const GUARDRAIL_OPTIONAL_PATTERNS = [
 
 export function classifyRisk(filePath) {
   for (const pattern of HIGH_RISK_PATTERNS) {
-    if (pattern.test(filePath)) return { level: "high", editsAllowed: 1 };
+    if (pattern.test(filePath)) {
+      return { level: "high", editsAllowed: 1 };
+    }
   }
   for (const pattern of MEDIUM_RISK_PATTERNS) {
-    if (pattern.test(filePath)) return { level: "medium", editsAllowed: 2 };
+    if (pattern.test(filePath)) {
+      return { level: "medium", editsAllowed: 2 };
+    }
   }
   return { level: "low", editsAllowed: 3 };
 }
 
 export function isPlanFile(filePath) {
-  return PLAN_GUARDED_PATTERNS.some(p => p.test(filePath));
+  const result = PLAN_GUARDED_PATTERNS.some(p => p.test(filePath));
+  return result;
 }
 
 export function isDoneMemo(filePath) {
-  return DONE_MEMO_PATTERNS.some(p => p.test(filePath));
+  const result = DONE_MEMO_PATTERNS.some(p => p.test(filePath));
+  return result;
 }
 
 export function isGuardrailOptional(filePath) {
   for (const pattern of GUARDRAIL_OPTIONAL_PATTERNS) {
-    if (pattern.test(filePath)) return true;
+    if (pattern.test(filePath)) {
+      return true;
+    }
   }
   return false;
 }

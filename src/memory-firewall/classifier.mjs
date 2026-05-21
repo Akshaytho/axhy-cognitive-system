@@ -1,3 +1,4 @@
+
 const CATEGORIES = {
   core_principle: {
     destination: 'CORE_MIND (rare)',
@@ -69,11 +70,14 @@ export function classifyKnowledge(content, source = '') {
 
   const lower = content.toLowerCase();
 
-  if (TEMPORARY_INDICATORS.some(p => p.test(content))) {
+  const hasProduct = PRODUCT_TERMS.some(t => new RegExp(`\\b${t}\\b`, 'i').test(lower));
+  const hasCore = CORE_TERMS.some(t => lower.includes(t));
+
+  if (hasProduct) {
     return {
-      category: 'temporary_context',
-      reason: 'Contains temporal/ephemeral language',
-      ...CATEGORIES.temporary_context,
+      category: 'product_rule',
+      reason: 'Contains product-specific terms',
+      ...CATEGORIES.product_rule,
     };
   }
 
@@ -86,23 +90,20 @@ export function classifyKnowledge(content, source = '') {
     };
   }
 
-  const hasProduct = PRODUCT_TERMS.some(t => new RegExp(`\\b${t}\\b`, 'i').test(lower));
-  const hasCore = CORE_TERMS.some(t => lower.includes(t));
-
-  if (hasProduct) {
-    return {
-      category: 'product_rule',
-      reason: 'Contains product-specific terms',
-      ...CATEGORIES.product_rule,
-    };
-  }
-
   if (hasCore) {
     return {
       category: 'core_principle',
       reason: 'Contains core reasoning terms without product terms — requires founder approval',
       ...CATEGORIES.core_principle,
       requires_founder_approval: true,
+    };
+  }
+
+  if (TEMPORARY_INDICATORS.some(p => p.test(content))) {
+    return {
+      category: 'temporary_context',
+      reason: 'Contains temporal/ephemeral language',
+      ...CATEGORIES.temporary_context,
     };
   }
 

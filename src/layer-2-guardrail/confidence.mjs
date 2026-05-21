@@ -1,7 +1,9 @@
+
 export function calculateConfidence({ riskLevel, fileWasRead, testsExist, hasWarnings, hasHardBlocks, intentValid }) {
   if (hasHardBlocks) {
     return {
       level: 'blocked',
+      score: 0,
       reason: 'Hard blocks from locked constraints prevent this change.',
     };
   }

@@ -1,3 +1,4 @@
+
 import { existsSync, readFileSync } from 'node:fs';
 
 let realImpactCheck = null;
@@ -37,7 +38,8 @@ export async function impactCheck(changeDescription, persona, riskLevel = 'low')
 
   if (realImpactCheck) {
     try {
-      return await realImpactCheck(changeDescription, persona);
+      const result = await realImpactCheck(changeDescription, persona);
+      return result;
     } catch (err) {
       return fallbackResult(`impactCheck DB error: ${err.message}`, riskLevel);
     }

@@ -195,13 +195,12 @@ describe('Layer 1: PreToolUse Hook (pre-edit-guard)', () => {
 
   describe('Guardrail-optional files', () => {
     it('should ALLOW editing README.md without guardrail', () => {
-      // No guardrail state — but README is optional
-      const result = runGuard({ file_path: 'docs/plans/my-plan.md' });
+      const result = runGuard({ file_path: 'README.md' });
       assert.equal(result.exitCode, 0);
     });
 
-    it('should ALLOW editing done-memos without guardrail', () => {
-      const result = runGuard({ file_path: 'handoff/done-memos/2026-05-20-done.md' });
+    it('should ALLOW editing research docs without guardrail', () => {
+      const result = runGuard({ file_path: 'docs/research/analysis.md' });
       assert.equal(result.exitCode, 0);
     });
   });
@@ -243,8 +242,8 @@ describe('Risk Classifier', async () => {
     assert.equal(classifyRisk('apps/mobile/src/components/Button.tsx').editsAllowed, 3);
   });
 
-  it('should mark docs/plans/*.md as guardrail-optional', () => {
-    assert.equal(isGuardrailOptional('docs/plans/my-plan.md'), true);
+  it('should mark docs/research/*.md as guardrail-optional', () => {
+    assert.equal(isGuardrailOptional('docs/research/analysis.md'), true);
   });
 
   it('should NOT mark docs/locked/*.md as guardrail-optional', () => {
