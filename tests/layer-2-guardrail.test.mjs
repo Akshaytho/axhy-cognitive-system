@@ -451,3 +451,130 @@ describe('Server Tool Definition', async () => {
     assert.ok(result.edits_remaining > 0);
   });
 });
+
+// --- Quality Gate Context-Aware Skips ---
+
+describe('Quality Gate False-Positive Filters', async () => {
+  const { runPatternChecks } = await import(
+    join(__dirname, '..', 'src', 'layer-2-guardrail', 'quality-gate.mjs')
+  );
+
+  function findCheck(findings, checkId) {
+    return findings.find(f => f.checkId === checkId);
+  }
+
+  it('should skip role_check in Prisma schema files', () => {
+    const content = '/// The authenticate middleware guards this model\nmodel User { id Int @id }';
+    const findings = runPatternChecks(content, 'packages/shared-schema/prisma/schema.prisma');
+    assert.equal(findCheck(findings, 'role_check'), undefined);
+  });
+
+  it('should skip role_check in comment lines', () => {
+    const content = '// authenticate middleware is applied at the router level\nconst x = 1;';
+    const findings = runPatternChecks(content, 'src/routes/auth.ts');
+    assert.equal(findCheck(findings, 'role_check'), undefined);
+  });
+
+  it('should STILL catch real role_check in code', () => {
+    const content = 'app.use(authenticate);\nconst data = fetchData();\nreturn data;';
+    const findings = runPatternChecks(content, 'src/routes/worker.ts');
+    assert.ok(findCheck(findings, 'role_check'));
+  });
+
+  it('should skip real_timer_in_test on production files', () => {
+    const content = 'setTimeout(() => server.close(), 5000);';
+    const findings = runPatternChecks(content, 'src/server.ts', false);
+    assert.equal(findCheck(findings, 'real_timer_in_test'), undefined);
+  });
+
+  it('should catch real_timer_in_test on test files', () => {
+    const content = 'await new Promise(resolve => setTimeout(resolve, 5000));';
+    const findings = runPatternChecks(content, 'src/server.test.ts', true);
+    assert.ok(findCheck(findings, 'real_timer_in_test'));
+  });
+
+  it('should skip unsafe_test_cast on production files', () => {
+    const content = 'const mod = imported as unknown as OneSignalModule;';
+    const findings = runPatternChecks(content, 'src/lib/onesignal.ts', false);
+    assert.equal(findCheck(findings, 'unsafe_test_cast'), undefined);
+  });
+
+  it('should skip hardcoded_route on route definitions', () => {
+    const content = "app.post('/auth/otp/request', async (req, res) => {});";
+    const findings = runPatternChecks(content, 'src/routes/auth.ts');
+    assert.equal(findCheck(findings, 'hardcoded_route'), undefined);
+  });
+
+  it('should STILL catch hardcoded_route on consumers', () => {
+    const content = "const res = await fetch('/auth/otp/request');";
+    const findings = runPatternChecks(content, 'src/lib/api.ts');
+    assert.ok(findCheck(findings, 'hardcoded_route'));
+  });
+
+  it('should skip hardcoded_url in const declarations', () => {
+    const content = "const POLICY_URL = 'https://axhy.app/privacy';";
+    const findings = runPatternChecks(content, 'src/consent.tsx');
+    assert.equal(findCheck(findings, 'hardcoded_url'), undefined);
+  });
+
+  it('should skip hardcoded_role in Expo Router paths', () => {
+    const content = "router.push('/(supervisor)/profile');";
+    const findings = runPatternChecks(content, 'src/navigation.ts');
+    assert.equal(findCheck(findings, 'hardcoded_role'), undefined);
+  });
+
+  it('should skip hardcoded_state_value with word boundary (previousState)', () => {
+    const content = "return { previousState: 'PENDING_ACTIVATION', newState: 'ACTIVE' };";
+    const findings = runPatternChecks(content, 'src/services/otp.ts');
+    assert.equal(findCheck(findings, 'hardcoded_state_value'), undefined);
+  });
+
+  it('should skip hardcoded_state_value in Prisma @default', () => {
+    const content = "status String @default('ACTIVE')";
+    const findings = runPatternChecks(content, 'prisma/schema.prisma');
+    assert.equal(findCheck(findings, 'hardcoded_state_value'), undefined);
+  });
+
+  it('should skip hardcoded_state_value in read-side where clause', () => {
+    const content = "const active = await prisma.membership.findMany({\n  where: {\n    status: 'ACTIVE',\n    companyId,\n  }\n});";
+    const findings = runPatternChecks(content, 'src/routes/auth.ts');
+    assert.equal(findCheck(findings, 'hardcoded_state_value'), undefined);
+  });
+
+  it('should skip hardcoded_state_value in test files', () => {
+    const content = "const worker = { state: 'PENDING_ACTIVATION', phone: '+91...' };";
+    const findings = runPatternChecks(content, 'test/auth.test.ts', true);
+    assert.equal(findCheck(findings, 'hardcoded_state_value'), undefined);
+  });
+
+  it('should skip unhandled_async when try/catch is within 20 lines', () => {
+    const lines = [
+      'async function handleVerify(code: string) {',
+      '  try {',
+      '    const a = 1;', '    const b = 2;', '    const c = 3;',
+      '    const d = 4;', '    const e = 5;', '    const f = 6;',
+      '    const g = 7;', '    const h = 8;', '    const i = 9;',
+      '    const result = await verifyOTP(code);',
+      '    return result;',
+      '  } catch (err) {',
+      '    setError(err.message);',
+      '  }',
+      '}',
+    ];
+    const content = lines.join('\n');
+    const findings = runPatternChecks(content, 'src/otp.tsx');
+    assert.equal(findCheck(findings, 'unhandled_async'), undefined);
+  });
+
+  it('should skip magic_number in comment lines', () => {
+    const content = '// timeout is :51 seconds for retry\nconst x = 1;';
+    const findings = runPatternChecks(content, 'src/lib/timer.ts');
+    assert.equal(findCheck(findings, 'magic_number'), undefined);
+  });
+
+  it('should skip magic_number in Prisma files', () => {
+    const content = 'digits Int @db.SmallInt @default(30)';
+    const findings = runPatternChecks(content, 'prisma/schema.prisma');
+    assert.equal(findCheck(findings, 'magic_number'), undefined);
+  });
+});

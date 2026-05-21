@@ -19,6 +19,58 @@ import { resolve } from 'node:path';
 
 const AXHY_V3_ROOT = process.env.AXHY_V3_ROOT || '/Users/thotaakshay/eclean_workspace/axhy-v3';
 
+const PRISMA_EXCLUDED_CHECKS = new Set([
+  'role_check', 'unsafe_cast', 'no_company_filter', 'no_input_validation',
+  'hardcoded_state_value', 'magic_number', 'hardcoded_role',
+]);
+
+const TEST_ONLY_CHECKS = new Set([
+  'real_timer_in_test', 'unsafe_test_cast',
+]);
+
+const COMMENT_SKIP_CHECKS = new Set([
+  'role_check', 'hardcoded_role', 'hardcoded_state_value', 'magic_number',
+]);
+
+function isCommentLine(line) {
+  const trimmed = line.trim();
+  return trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*');
+}
+
+function shouldSkipMatch(checkId, matchText, line, contextLines, lineNum) {
+  if (isCommentLine(line) && COMMENT_SKIP_CHECKS.has(checkId)) return true;
+
+  if (checkId === 'hardcoded_route') {
+    if (/\bapp\.(get|post|put|delete|patch|register)\s*\(/.test(line)) return true;
+    if (/\brouter\.(get|post|put|delete|patch)\s*\(/.test(line)) return true;
+  }
+
+  if (checkId === 'hardcoded_url') {
+    if (/^\s*(export\s+)?(const|let|var)\s+\w+\s*=/.test(line)) return true;
+  }
+
+  if (checkId === 'hardcoded_role') {
+    if (/\/\([^)]*\)\//.test(line)) return true;
+  }
+
+  if (checkId === 'hardcoded_state_value') {
+    if (/@default\(/.test(line)) return true;
+    const start = Math.max(0, lineNum - 6);
+    const end = Math.min(contextLines.length, lineNum + 1);
+    const ctx = contextLines.slice(start, end).join('\n');
+    if (/where\s*[:=]/i.test(ctx) && !/\.update\s*\(|\.upsert\s*\(/.test(ctx)) return true;
+  }
+
+  if (checkId === 'unhandled_async') {
+    const start = Math.max(0, lineNum - 20);
+    const end = Math.min(contextLines.length, lineNum + 10);
+    const ctx = contextLines.slice(start, end).join('\n');
+    if (/try\s*\{|\.catch\(/.test(ctx)) return true;
+  }
+
+  return false;
+}
+
 const CHECK_CATEGORIES = [
   {
     id: 'trust_boundaries',
@@ -71,7 +123,7 @@ const CHECK_CATEGORIES = [
     weight: 'critical',
     checks: [
       { id: 'direct_state_update', pattern: /prisma\.\w+\.update\(\s*\{[^}]*(?:state|status)\s*:/g, message: 'Direct DB state/status update — must go through machine transition function' },
-      { id: 'hardcoded_state_value', pattern: /(?:state|status)\s*[:=]\s*['"`](ACTIVE|PENDING|COMPLETED|CANCELLED|APPROVED|REJECTED)/gi, antiPattern: /machine|transition|actor|send|assert|expect|test|describe/g, message: 'Hardcoded state value — derive from machine transition result' },
+      { id: 'hardcoded_state_value', pattern: /\b(?:state|status)\b\s*[:=]\s*['"`](ACTIVE|PENDING|COMPLETED|CANCELLED|APPROVED|REJECTED)/gi, antiPattern: /machine|transition|actor|send|assert|expect|test|describe/g, message: 'Hardcoded state value — derive from machine transition result' },
     ],
   },
   {
@@ -121,11 +173,16 @@ const CHECK_CATEGORIES = [
 
 export function runPatternChecks(fileContent, filePath, isTestFile = false) {
   const findings = [];
+  const isPrisma = filePath.endsWith('.prisma');
+  const contextLines = fileContent.split('\n');
 
   for (const category of CHECK_CATEGORIES) {
     for (const check of category.checks) {
       if (!check.pattern) continue;
       if (isTestFile && ['hardcoded_route', 'hardcoded_role', 'magic_number', 'console_log'].includes(check.id)) continue;
+      if (isPrisma && PRISMA_EXCLUDED_CHECKS.has(check.id)) continue;
+      if (!isTestFile && TEST_ONLY_CHECKS.has(check.id)) continue;
+      if (isTestFile && check.id === 'hardcoded_state_value') continue;
 
       check.pattern.lastIndex = 0;
       const matches = [];
@@ -138,38 +195,35 @@ export function runPatternChecks(fileContent, filePath, isTestFile = false) {
 
       if (matches.length === 0) continue;
 
+      let filtered = matches;
+
       if (check.antiPattern) {
-        const contextLines = fileContent.split('\n');
-        const filtered = matches.filter(m => {
+        filtered = filtered.filter(m => {
           const start = Math.max(0, m.line - 3);
           const end = Math.min(contextLines.length, m.line + 2);
           const context = contextLines.slice(start, end).join('\n');
           check.antiPattern.lastIndex = 0;
           return !check.antiPattern.test(context);
         });
-        if (filtered.length === 0) continue;
-        findings.push({
-          category: category.id,
-          categoryName: category.name,
-          weight: category.weight,
-          checkId: check.id,
-          message: check.message,
-          file: filePath,
-          occurrences: filtered.map(m => ({ line: m.line, text: m.text })),
-          count: filtered.length,
-        });
-      } else {
-        findings.push({
-          category: category.id,
-          categoryName: category.name,
-          weight: category.weight,
-          checkId: check.id,
-          message: check.message,
-          file: filePath,
-          occurrences: matches.map(m => ({ line: m.line, text: m.text })),
-          count: matches.length,
-        });
       }
+
+      filtered = filtered.filter(m => {
+        const line = contextLines[m.line - 1] || '';
+        return !shouldSkipMatch(check.id, m.text, line, contextLines, m.line);
+      });
+
+      if (filtered.length === 0) continue;
+
+      findings.push({
+        category: category.id,
+        categoryName: category.name,
+        weight: category.weight,
+        checkId: check.id,
+        message: check.message,
+        file: filePath,
+        occurrences: filtered.map(m => ({ line: m.line, text: m.text })),
+        count: filtered.length,
+      });
     }
   }
 
