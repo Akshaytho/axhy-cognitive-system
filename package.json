@@ -1,0 +1,19 @@
+{
+  "name": "axhy-cognitive-system",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Axhy Cognitive System — Core Mind + Product Brain + Guardrail Engine + Memory Firewall",
+  "scripts": {
+    "test": "node --test --test-concurrency=1 tests/",
+    "test:layer1": "node --test tests/layer-1-hook.test.mjs",
+    "test:layer2": "node --test tests/layer-2-guardrail.test.mjs",
+    "test:layer3": "node --test tests/layer-3-compaction.test.mjs",
+    "test:firewall": "node --test tests/memory-firewall.test.mjs",
+    "test:corruption": "node --test tests/anti-corruption.test.mjs",
+    "test:integration": "node --test tests/integration.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,57 @@
+const HIGH_RISK_PATTERNS = [
+  /CLAUDE\.md$/,
+  /CORE_MIND\.md$/,
+  /PROJECT_ENTRYPOINT\.md$/,
+  /\.claude\/settings\.json$/,
+  /settings\.json$/,
+  /\.husky\//,
+  /mcp-guardrail\//,
+  /cognitive-system\//,
+  /session-audit\.ts$/,
+  /brain-builder\.ts$/,
+  /vector-knowledge\.ts$/,
+  /docs\/locked\//,
+  /prisma\/schema/,
+  /\.env/,
+  /memory-firewall/,
+  /anti-corruption/,
+];
+
+const MEDIUM_RISK_PATTERNS = [
+  /\/routes\//,
+  /state-machine/,
+  /-machine\.ts$/,
+  /packages\/ai-tools\/src\//,
+  /docs\/learnings\//,
+  /docs\/decisions\//,
+  /docs\/protocols\//,
+];
+
+const GUARDRAIL_OPTIONAL_PATTERNS = [
+  /docs\/plans\/.*\.md$/,
+  /docs\/research\/.*\.md$/,
+  /docs\/findings\/.*\.md$/,
+  /handoff\/done-memos\/.*\.md$/,
+  /README\.md$/,
+  /docs\/audits\/.*\.md$/,
+  /docs\/done-memos\/.*\.md$/,
+  /\.mcp\.json$/,
+  /\.claude\/settings.*\.json$/,
+];
+
+export function classifyRisk(filePath) {
+  for (const pattern of HIGH_RISK_PATTERNS) {
+    if (pattern.test(filePath)) return { level: 'high', editsAllowed: 1 };
+  }
+  for (const pattern of MEDIUM_RISK_PATTERNS) {
+    if (pattern.test(filePath)) return { level: 'medium', editsAllowed: 2 };
+  }
+  return { level: 'low', editsAllowed: 3 };
+}
+
+export function isGuardrailOptional(filePath) {
+  for (const pattern of GUARDRAIL_OPTIONAL_PATTERNS) {
+    if (pattern.test(filePath)) return true;
+  }
+  return false;
+}
