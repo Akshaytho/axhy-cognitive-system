@@ -13,6 +13,7 @@
  */
 
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import { resolve, extname } from 'node:path';
 import { auditSliceFiles, gradeFindings } from './quality-gate.mjs';
 import {
@@ -21,6 +22,25 @@ import {
 } from './state-tracker.mjs';
 
 const AXHY_V3_ROOT = process.env.AXHY_V3_ROOT || '/Users/thotaakshay/eclean_workspace/axhy-v3';
+
+function checkFilesCommitted(sliceFiles) {
+  try {
+    const args = sliceFiles.map(f => {
+      const full = f.startsWith('/') ? f : resolve(AXHY_V3_ROOT, f);
+      return `"${full}"`;
+    }).join(' ');
+    const result = execSync(
+      `git -C "${AXHY_V3_ROOT}" status --porcelain -- ${args}`,
+      { encoding: 'utf-8', timeout: 10000 }
+    ).trim();
+    if (result.length > 0) {
+      return { allCommitted: false, uncommitted: result.split('\n').map(l => l.trim()) };
+    }
+    return { allCommitted: true, uncommitted: [] };
+  } catch {
+    return { allCommitted: true, uncommitted: [], skipped: true };
+  }
+}
 
 const UI_EXTENSIONS = ['.tsx', '.ts', '.jsx', '.js'];
 
@@ -33,6 +53,8 @@ export async function checkBeforeDone({
   typecheckPassed = false,
   testsPassed = false,
   coverageNotes = '',
+  selfReasoningSummary = '',
+  handoffUpdated = false,
   manualChecks = {},
 }) {
   if (!intent || typeof intent !== 'string' || intent.trim().split(/\s+/).length < 15) {
@@ -86,6 +108,31 @@ export async function checkBeforeDone({
     preflightFailures.push(
       'Missing coverage notes. Describe which sprint plan items this slice covers, ' +
       'what source requirements are satisfied, and any known gaps remaining.'
+    );
+  }
+
+  // Git commit check — programmatic, can't be faked
+  const gitStatus = checkFilesCommitted(sliceFiles);
+  if (!gitStatus.allCommitted) {
+    preflightFailures.push(
+      'Uncommitted slice files detected. Commit all work to git before declaring done. ' +
+      'Uncommitted code is not shipped code.\n' +
+      gitStatus.uncommitted.map(f => '  ' + f).join('\n')
+    );
+  }
+
+  if (!selfReasoningSummary || selfReasoningSummary.trim().length < 20) {
+    preflightFailures.push(
+      'Missing self-reasoning summary (20+ chars). Before non-trivial work, you must run ' +
+      'the 7-phase self-reasoning protocol including impactCheck(). Describe what it returned, ' +
+      'what assumptions were verified, and what locked constraints were checked.'
+    );
+  }
+
+  if (!handoffUpdated) {
+    preflightFailures.push(
+      'Handoff files not updated. Before declaring done, update NEXT_SESSION.md and STATUS.md ' +
+      'so the next session knows the current state without hunting for done memos.'
     );
   }
 

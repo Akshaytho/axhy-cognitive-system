@@ -602,3 +602,56 @@ describe('Quality Gate False-Positive Filters', async () => {
     assert.ok(findCheck(findings, 'unhandled_async'));
   });
 });
+
+// --- Done-Memo Process Gates ---
+
+describe('Done-Memo Process Gates', async () => {
+  const { checkBeforeDone } = await import(
+    join(__dirname, '..', 'src', 'layer-2-guardrail', 'check-before-done.mjs')
+  );
+
+  const BASE_ARGS = {
+    intent: 'Completed backend routes for worker today endpoint with real DB tests against Railway sandbox, covering GET /worker/today and GET /worker/visits/:id with proper tenant isolation',
+    sliceName: 'worker-d1-s2a-1-backend-today',
+    doneMemoFile: 'handoff/done-memo-test.md',
+    sliceFiles: ['package.json'],
+    screenshotsTaken: false,
+    typecheckPassed: true,
+    testsPassed: true,
+    coverageNotes: 'Covers sprint plan items 2a-1: backend routes for /worker/today and /worker/visits/:id. No UI in this sub-slice.',
+    selfReasoningSummary: 'impactCheck returned no hardBlocks. Verified locked constraints on multi-tenant isolation. No stale docs found.',
+    handoffUpdated: true,
+  };
+
+  it('should block when self_reasoning_summary is missing', async () => {
+    const result = await checkBeforeDone({ ...BASE_ARGS, selfReasoningSummary: '' });
+    assert.equal(result.allowed, false);
+    const hasSelfReasoning = result.preflight_failures.some(f => f.includes('self-reasoning'));
+    assert.ok(hasSelfReasoning, 'Should mention self-reasoning in preflight failure');
+  });
+
+  it('should block when handoff_updated is false', async () => {
+    const result = await checkBeforeDone({ ...BASE_ARGS, handoffUpdated: false });
+    assert.equal(result.allowed, false);
+    const hasHandoff = result.preflight_failures.some(f => f.includes('Handoff'));
+    assert.ok(hasHandoff, 'Should mention handoff in preflight failure');
+  });
+
+  it('should block when self_reasoning_summary is too short', async () => {
+    const result = await checkBeforeDone({ ...BASE_ARGS, selfReasoningSummary: 'ran impactCheck' });
+    assert.equal(result.allowed, false);
+    const hasSelfReasoning = result.preflight_failures.some(f => f.includes('self-reasoning'));
+    assert.ok(hasSelfReasoning);
+  });
+
+  it('should pass when all process gates are satisfied', async () => {
+    const result = await checkBeforeDone(BASE_ARGS);
+    // May still fail on quality gate (no real files), but should NOT fail on preflight
+    if (!result.allowed && result.preflight_failures) {
+      const processGates = result.preflight_failures.filter(f =>
+        f.includes('self-reasoning') || f.includes('Handoff') || f.includes('Uncommitted')
+      );
+      assert.equal(processGates.length, 0, 'No process gate failures when all gates satisfied');
+    }
+  });
+});

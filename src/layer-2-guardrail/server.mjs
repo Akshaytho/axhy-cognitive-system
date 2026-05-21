@@ -189,8 +189,16 @@ const DONE_TOOL_DEFINITION = {
         type: 'string',
         description: 'Which sprint plan items this slice covers, what source requirements are satisfied, and any known gaps remaining (20+ chars).',
       },
+      self_reasoning_summary: {
+        type: 'string',
+        description: 'What impactCheck() returned, what assumptions were verified, what locked constraints were checked. Must run 7-phase self-reasoning protocol before non-trivial work (20+ chars).',
+      },
+      handoff_updated: {
+        type: 'boolean',
+        description: 'Whether NEXT_SESSION.md and STATUS.md were updated to reflect this slice completion. Required so the next session knows current state.',
+      },
     },
-    required: ['intent', 'slice_name', 'done_memo_file', 'slice_files', 'screenshots_taken', 'typecheck_passed', 'tests_passed', 'coverage_notes'],
+    required: ['intent', 'slice_name', 'done_memo_file', 'slice_files', 'screenshots_taken', 'typecheck_passed', 'tests_passed', 'coverage_notes', 'self_reasoning_summary', 'handoff_updated'],
   },
 };
 
@@ -204,6 +212,8 @@ export async function handleDoneToolCall(args) {
     typecheckPassed: args.typecheck_passed || false,
     testsPassed: args.tests_passed || false,
     coverageNotes: args.coverage_notes || '',
+    selfReasoningSummary: args.self_reasoning_summary || '',
+    handoffUpdated: args.handoff_updated || false,
   });
 }
 
