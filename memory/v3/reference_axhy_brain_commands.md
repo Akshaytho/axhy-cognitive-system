@@ -46,6 +46,20 @@ Both halves work together: learnings written by audit failures get embedded by b
 
 **Critical:** When user says "start axhy brain", run `brain:build` via Railway — NOT `audit`. Audit is separate and automatic.
 
+## Why `railway run --` is mandatory (not optional)
+
+The database URL uses `postgres.railway.internal` — an internal DNS name that **only resolves inside Railway's network**. Your laptop is outside that network.
+
+- `railway run -- pnpm ...brain:build` → Railway CLI proxies the connection through its network. **Works.**
+- `pnpm ...brain:build` (no prefix) → tries to resolve `postgres.railway.internal` from your laptop → **DNS fails, build fails silently.**
+
+**This is not a nice-to-have. Without `railway run --`, the brain cannot connect to the database. Period.**
+
+If `railway` CLI is not in PATH, use the full path: `~/.railway/bin/railway run -- ...`
+If `pnpm` is not in PATH, use: `/Users/thotaakshay/.nvm/versions/node/v20.20.1/bin/npx pnpm ...`
+
+**When brain:build fails with DNS/connection errors:** do NOT skip it and proceed. Surface it to the founder. The brain powers impactCheck() — without it, the AI loses its memory of locked constraints and past mistakes.
+
 ## How the brain improves itself — the simple version
 
 ```
