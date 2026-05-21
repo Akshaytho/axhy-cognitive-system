@@ -3,12 +3,14 @@
 import { createInterface } from 'node:readline';
 import { existsSync, readFileSync } from 'node:fs';
 import { checkBeforeEdit } from './check-before-edit.mjs';
+import { checkBeforePlan } from './check-before-plan.mjs';
+import { checkBeforeDone } from './check-before-done.mjs';
 import { impactCheck, loadRealImpactCheck, isConnected } from './impact-adapter.mjs';
 
 const READ_STATE_FILE = '/tmp/axhy-read-state.json';
 const READ_WINDOW_MS = 10 * 60 * 1000;
 
-const TOOL_DEFINITION = {
+const EDIT_TOOL_DEFINITION = {
   name: 'check_before_edit',
   description: 'Call this BEFORE editing any code file. Validates intent, checks risk, returns scoped approval with edit limits. High-risk files (CLAUDE.md, hooks, locked docs) get 1 edit. Medium-risk (routes, state machines) get 2. Low-risk get 3. Approval expires after 5 minutes.',
   inputSchema: {
@@ -42,6 +44,50 @@ const TOOL_DEFINITION = {
   },
 };
 
+const PLAN_TOOL_DEFINITION = {
+  name: 'check_before_plan',
+  description: 'Call this BEFORE writing any plan, sprint plan, implementation plan, persona doc, or handoff file. Requires architecture inventory (you must have Read the existing state machines, Prisma schema, routes, mobile structure, locked docs, and UI tokens). Validates source hierarchy — persona docs are NOT implementation truth. Audits plan content for anti-patterns (direct DB updates, enum fields where machines exist).',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      intent: {
+        type: 'string',
+        description: 'What plan you are writing and why (20+ words). Include: product area, what sources inform it, what it will specify.',
+      },
+      target_plan_file: {
+        type: 'string',
+        description: 'The plan file you intend to write or edit.',
+      },
+      source_docs: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Source documents this plan is based on. MUST include existing architecture paths (state machines, schema, routes) if the plan touches those areas.',
+      },
+      affected_product_area: {
+        type: 'string',
+        description: 'Which product area: worker, supervisor, admin, backend, shared.',
+      },
+      architecture_inventory: {
+        type: 'object',
+        properties: {
+          state_machines_checked: { type: 'boolean', description: 'Read packages/state-machines/src/ and understand existing machines' },
+          prisma_schema_checked: { type: 'boolean', description: 'Read Prisma schema and understand existing tables/relations' },
+          existing_routes_checked: { type: 'boolean', description: 'Read existing backend routes in the affected area' },
+          mobile_structure_checked: { type: 'boolean', description: 'Read mobile app structure and existing screens' },
+          locked_docs_checked: { type: 'boolean', description: 'Read relevant locked docs in docs/locked/' },
+          tokens_components_checked: { type: 'boolean', description: 'Read UI tokens and existing shared components' },
+        },
+        description: 'Checklist of existing architecture you have Read. ALL must be true before writing a plan.',
+      },
+      plan_content: {
+        type: 'string',
+        description: 'Optional: the plan content you intend to write, for pre-write anti-pattern scanning.',
+      },
+    },
+    required: ['intent', 'target_plan_file', 'source_docs', 'architecture_inventory'],
+  },
+};
+
 function getFileReadStatus(filePaths) {
   if (!existsSync(READ_STATE_FILE)) return {};
   let reads;
@@ -54,7 +100,7 @@ function getFileReadStatus(filePaths) {
   return status;
 }
 
-export async function handleToolCall({ intent, file_paths, change_type, answered_question, evidence }) {
+export async function handleEditToolCall({ intent, file_paths, change_type, answered_question, evidence }) {
   let impactResult = null;
   if (intent && !answered_question) {
     try {
@@ -85,7 +131,70 @@ export async function handleToolCall({ intent, file_paths, change_type, answered
   });
 }
 
-export { TOOL_DEFINITION };
+export async function handlePlanToolCall(args) {
+  return checkBeforePlan({
+    intent: args.intent,
+    targetPlanFile: args.target_plan_file,
+    sourceDocs: args.source_docs || [],
+    affectedProductArea: args.affected_product_area || '',
+    architectureInventory: args.architecture_inventory || {},
+    planContent: args.plan_content || '',
+  });
+}
+
+const DONE_TOOL_DEFINITION = {
+  name: 'check_before_done',
+  description: 'Call this BEFORE writing a done memo or declaring any slice/task complete. Runs quality gate (9 check categories, L1-L5 grading), requires typecheck passed, tests passed, and screenshots taken (for UI work). Blocks done-memo writes until grade >= L3 (Senior). Returns fix list for self-iteration until quality passes.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      intent: {
+        type: 'string',
+        description: 'What the slice accomplished and what was verified (15+ words).',
+      },
+      slice_name: {
+        type: 'string',
+        description: 'Name of the slice being completed (e.g., "worker-d1-s1-auth-shell").',
+      },
+      done_memo_file: {
+        type: 'string',
+        description: 'File path where the done memo will be written.',
+      },
+      slice_files: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Every file created or modified in this slice — all will be quality-reviewed.',
+      },
+      screenshots_taken: {
+        type: 'boolean',
+        description: 'Whether screenshots of every screen/flow have been captured. Required if slice has UI files.',
+      },
+      typecheck_passed: {
+        type: 'boolean',
+        description: 'Whether typecheck (tsc --noEmit) passed green.',
+      },
+      tests_passed: {
+        type: 'boolean',
+        description: 'Whether all tests for affected packages passed green.',
+      },
+    },
+    required: ['intent', 'slice_name', 'done_memo_file', 'slice_files', 'screenshots_taken', 'typecheck_passed', 'tests_passed'],
+  },
+};
+
+export async function handleDoneToolCall(args) {
+  return checkBeforeDone({
+    intent: args.intent,
+    sliceName: args.slice_name,
+    doneMemoFile: args.done_memo_file,
+    sliceFiles: args.slice_files || [],
+    screenshotsTaken: args.screenshots_taken || false,
+    typecheckPassed: args.typecheck_passed || false,
+    testsPassed: args.tests_passed || false,
+  });
+}
+
+export { EDIT_TOOL_DEFINITION, PLAN_TOOL_DEFINITION, DONE_TOOL_DEFINITION };
 
 function send(msg) {
   const json = JSON.stringify(msg);
@@ -102,7 +211,7 @@ function handleMessage(msg) {
       result: {
         protocolVersion: '2024-11-05',
         capabilities: { tools: {} },
-        serverInfo: { name: 'axhy-guardrail', version: '0.1.0' },
+        serverInfo: { name: 'axhy-guardrail', version: '0.3.0' },
       },
     });
   }
@@ -113,7 +222,7 @@ function handleMessage(msg) {
     return send({
       jsonrpc: '2.0',
       id,
-      result: { tools: [TOOL_DEFINITION] },
+      result: { tools: [EDIT_TOOL_DEFINITION, PLAN_TOOL_DEFINITION, DONE_TOOL_DEFINITION] },
     });
   }
 
@@ -121,7 +230,14 @@ function handleMessage(msg) {
     const toolName = params?.name;
     const args = params?.arguments || {};
 
-    if (toolName !== 'check_before_edit') {
+    let handler;
+    if (toolName === 'check_before_edit') {
+      handler = handleEditToolCall(args);
+    } else if (toolName === 'check_before_plan') {
+      handler = handlePlanToolCall(args);
+    } else if (toolName === 'check_before_done') {
+      handler = handleDoneToolCall(args);
+    } else {
       return send({
         jsonrpc: '2.0',
         id,
@@ -129,7 +245,7 @@ function handleMessage(msg) {
       });
     }
 
-    handleToolCall(args).then(result => {
+    handler.then(result => {
       send({
         jsonrpc: '2.0',
         id,

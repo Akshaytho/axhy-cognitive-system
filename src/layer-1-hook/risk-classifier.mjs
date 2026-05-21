@@ -29,24 +29,42 @@ const MEDIUM_RISK_PATTERNS = [
   /docs\/protocols\//,
 ];
 
-const GUARDRAIL_OPTIONAL_PATTERNS = [
+const PLAN_GUARDED_PATTERNS = [
   /docs\/plans\/.*\.md$/,
+  /docs\/personas\/.*\.md$/,
+  /handoff\/(?!done-memos\/).*\.md$/,
+  /SPRINT_PLAN\.md$/i,
+  /IMPLEMENTATION_PLAN\.md$/i,
+];
+
+const DONE_MEMO_PATTERNS = [
+  /done-memo.*\.md$/i,
+  /handoff\/done-memos\/.*\.md$/,
+];
+
+const GUARDRAIL_OPTIONAL_PATTERNS = [
   /docs\/research\/.*\.md$/,
   /docs\/findings\/.*\.md$/,
-  /handoff\/done-memos\/.*\.md$/,
   /README\.md$/,
   /docs\/audits\/.*\.md$/,
-  /docs\/done-memos\/.*\.md$/,
 ];
 
 export function classifyRisk(filePath) {
   for (const pattern of HIGH_RISK_PATTERNS) {
-    if (pattern.test(filePath)) return { level: 'high', editsAllowed: 1 };
+    if (pattern.test(filePath)) return { level: "high", editsAllowed: 1 };
   }
   for (const pattern of MEDIUM_RISK_PATTERNS) {
-    if (pattern.test(filePath)) return { level: 'medium', editsAllowed: 2 };
+    if (pattern.test(filePath)) return { level: "medium", editsAllowed: 2 };
   }
-  return { level: 'low', editsAllowed: 3 };
+  return { level: "low", editsAllowed: 3 };
+}
+
+export function isPlanFile(filePath) {
+  return PLAN_GUARDED_PATTERNS.some(p => p.test(filePath));
+}
+
+export function isDoneMemo(filePath) {
+  return DONE_MEMO_PATTERNS.some(p => p.test(filePath));
 }
 
 export function isGuardrailOptional(filePath) {
