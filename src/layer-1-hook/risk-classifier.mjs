@@ -58,10 +58,10 @@ export function classifyRisk(filePath) {
   }
   for (const pattern of MEDIUM_RISK_PATTERNS) {
     if (pattern.test(filePath)) {
-      return { level: "medium", editsAllowed: 2 };
+      return { level: "medium", editsAllowed: 5 };
     }
   }
-  return { level: "low", editsAllowed: 3 };
+  return { level: "low", editsAllowed: 8 };
 }
 
 export function isPlanFile(filePath) {

@@ -64,35 +64,22 @@ describe('Integration: Layer 2 approval → Layer 1 enforcement', async () => {
       testStatus: { 'apps/mobile/src/components/Button.tsx': true },
     });
     assert.equal(approval.allowed, true);
-    assert.equal(approval.edits_remaining, 3);
+    assert.equal(approval.edits_remaining, 8);
 
     // Step 2: Simulate file read (Layer 1 checks this)
     markFileRead('apps/mobile/src/components/Button.tsx');
 
-    // Step 3: Layer 1 hook should allow
-    const r1 = runGuard('apps/mobile/src/components/Button.tsx');
-    assert.equal(r1.exitCode, 0, `Expected allow, got: ${r1.stderr}`);
+    // Step 3-10: All 8 edits should succeed, then 9th blocks
+    for (let i = 0; i < 8; i++) {
+      const r = runGuard('apps/mobile/src/components/Button.tsx');
+      assert.equal(r.exitCode, 0, `Edit ${i + 1}/8 should succeed`);
+      const state = JSON.parse(readFileSync(STATE_FILE, 'utf-8'));
+      assert.equal(state.edits_remaining, 8 - (i + 1));
+    }
 
-    // Step 4: Edits should decrement
-    const state1 = JSON.parse(readFileSync(STATE_FILE, 'utf-8'));
-    assert.equal(state1.edits_remaining, 2);
-
-    // Step 5: Second edit should still work
-    const r2 = runGuard('apps/mobile/src/components/Button.tsx');
-    assert.equal(r2.exitCode, 0);
-    const state2 = JSON.parse(readFileSync(STATE_FILE, 'utf-8'));
-    assert.equal(state2.edits_remaining, 1);
-
-    // Step 6: Third edit exhausts the limit
-    const r3 = runGuard('apps/mobile/src/components/Button.tsx');
-    assert.equal(r3.exitCode, 0);
-    const state3 = JSON.parse(readFileSync(STATE_FILE, 'utf-8'));
-    assert.equal(state3.edits_remaining, 0);
-
-    // Step 7: Fourth edit should be BLOCKED
-    const r4 = runGuard('apps/mobile/src/components/Button.tsx');
-    assert.equal(r4.exitCode, 2);
-    assert.match(r4.stderr, /Edit limit reached/);
+    const rBlocked = runGuard('apps/mobile/src/components/Button.tsx');
+    assert.equal(rBlocked.exitCode, 2);
+    assert.match(rBlocked.stderr, /Edit limit reached/);
   });
 
   it('Flow 2: L2 blocks high-risk with question → L1 blocks → answer unlocks', () => {
@@ -267,10 +254,10 @@ describe('Integration: Full risk classification → approval → enforcement cha
     assert.equal(r2.exitCode, 2);
   });
 
-  it('medium-risk file → 2 edits allowed → blocks after 2', () => {
+  it('medium-risk file → 5 edits allowed → blocks after 5', () => {
     const risk = classifyRisk('apps/backend/src/routes/chat.ts');
     assert.equal(risk.level, 'medium');
-    assert.equal(risk.editsAllowed, 2);
+    assert.equal(risk.editsAllowed, 5);
 
     checkBeforeEdit({
       intent: VALID_INTENT,
@@ -280,13 +267,12 @@ describe('Integration: Full risk classification → approval → enforcement cha
     });
 
     markFileRead('apps/backend/src/routes/chat.ts');
-    const r1 = runGuard('apps/backend/src/routes/chat.ts');
-    assert.equal(r1.exitCode, 0);
+    for (let i = 0; i < 5; i++) {
+      const r = runGuard('apps/backend/src/routes/chat.ts');
+      assert.equal(r.exitCode, 0, `Edit ${i + 1}/5 should succeed`);
+    }
 
-    const r2 = runGuard('apps/backend/src/routes/chat.ts');
-    assert.equal(r2.exitCode, 0);
-
-    const r3 = runGuard('apps/backend/src/routes/chat.ts');
-    assert.equal(r3.exitCode, 2);
+    const rBlocked = runGuard('apps/backend/src/routes/chat.ts');
+    assert.equal(rBlocked.exitCode, 2, 'Edit 6 should be blocked');
   });
 });

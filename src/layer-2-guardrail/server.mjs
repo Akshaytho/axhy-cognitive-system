@@ -8,6 +8,7 @@ import { checkBeforePlan } from './check-before-plan.mjs';
 import { checkBeforeDone } from './check-before-done.mjs';
 import { impactCheck, loadRealImpactCheck, isConnected } from './impact-adapter.mjs';
 import { classifyRisk } from '../layer-1-hook/risk-classifier.mjs';
+import { logApprovalCreated, logApprovalDenied } from './audit-log.mjs';
 
 const REPO_ROOT = process.env.AXHY_REPO_ROOT || process.cwd();
 const REPO_HASH = createHash('md5').update(REPO_ROOT).digest('hex').slice(0, 8);
@@ -129,7 +130,7 @@ export async function handleEditToolCall({ intent, file_paths, change_type, answ
     } catch {}
   }
 
-  return checkBeforeEdit({
+  const result = checkBeforeEdit({
     intent,
     filePaths: file_paths,
     changeType: change_type,
@@ -139,6 +140,24 @@ export async function handleEditToolCall({ intent, file_paths, change_type, answ
     testStatus: {},
     impactCheckResult: impactResult,
   });
+
+  if (result.allowed) {
+    logApprovalCreated({
+      tool: 'check_before_edit',
+      intent,
+      approvedFiles: result.approved_files || [],
+      editsRemaining: result.edits_remaining,
+      confidence: result.confidence,
+    });
+  } else {
+    logApprovalDenied({
+      tool: 'check_before_edit',
+      file: (file_paths || [])[0],
+      reason: result.reason,
+    });
+  }
+
+  return result;
 }
 
 export async function handlePlanToolCall(args) {

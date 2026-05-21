@@ -14,6 +14,7 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { classifyRisk, isGuardrailOptional, isPlanFile, isDoneMemo } from './risk-classifier.mjs';
+import { logApprovalConsumed, logApprovalDenied, logApprovalExpired } from '../layer-2-guardrail/audit-log.mjs';
 
 const REPO_ROOT = process.env.AXHY_REPO_ROOT || process.cwd();
 const REPO_HASH = createHash('md5').update(REPO_ROOT).digest('hex').slice(0, 8);
@@ -21,8 +22,8 @@ const STATE_FILE = `/tmp/axhy-${REPO_HASH}-guardrail-state.json`;
 const PLAN_STATE_FILE = `/tmp/axhy-${REPO_HASH}-plan-guardrail-state.json`;
 const DONE_STATE_FILE = `/tmp/axhy-${REPO_HASH}-done-guardrail-state.json`;
 const READ_STATE_FILE = `/tmp/axhy-${REPO_HASH}-read-state.json`;
-const APPROVAL_WINDOW_MS = 5 * 60 * 1000;
-const DONE_APPROVAL_WINDOW_MS = 10 * 60 * 1000;
+const APPROVAL_WINDOW_MS = 15 * 60 * 1000;
+const DONE_APPROVAL_WINDOW_MS = 20 * 60 * 1000;
 const READ_WINDOW_MS = 10 * 60 * 1000;
 
 function readJsonState(file) {
@@ -99,6 +100,7 @@ function checkGuardedFile(filePath, stateFile, windowMs, toolName) {
 
   state.edits_remaining = (state.edits_remaining || 1) - 1;
   writeJsonState(stateFile, state);
+  logApprovalConsumed({ tool: toolName, file: filePath, editsRemainingAfter: state.edits_remaining });
   allow();
 }
 
@@ -191,6 +193,7 @@ async function main() {
 
   state.edits_remaining = (state.edits_remaining || 1) - 1;
   writeJsonState(STATE_FILE, state);
+  logApprovalConsumed({ tool: 'check_before_edit', file: filePath, editsRemainingAfter: state.edits_remaining });
   allow();
 }
 

@@ -155,10 +155,10 @@ describe('Layer 1: PreToolUse Hook (pre-edit-guard)', () => {
   });
 
   describe('Time window enforcement', () => {
-    it('should BLOCK when approval is expired (>5 min)', () => {
+    it('should BLOCK when approval is expired (>15 min)', () => {
       writeGuardrailState({
         approved_files: ['routes/chat.ts'],
-        timestamp: Date.now() - 6 * 60 * 1000, // 6 minutes ago
+        timestamp: Date.now() - 16 * 60 * 1000, // 16 minutes ago
       });
       markFileRead('apps/backend/src/routes/chat.ts');
       const result = runGuard({ file_path: 'apps/backend/src/routes/chat.ts' });
@@ -230,7 +230,7 @@ describe('Risk Classifier', async () => {
 
   it('should classify routes/chat.ts as medium-risk', () => {
     assert.equal(classifyRisk('apps/backend/src/routes/chat.ts').level, 'medium');
-    assert.equal(classifyRisk('apps/backend/src/routes/chat.ts').editsAllowed, 2);
+    assert.equal(classifyRisk('apps/backend/src/routes/chat.ts').editsAllowed, 5);
   });
 
   it('should classify session-audit.ts as high-risk', () => {
@@ -239,7 +239,7 @@ describe('Risk Classifier', async () => {
 
   it('should classify a regular component as low-risk', () => {
     assert.equal(classifyRisk('apps/mobile/src/components/Button.tsx').level, 'low');
-    assert.equal(classifyRisk('apps/mobile/src/components/Button.tsx').editsAllowed, 3);
+    assert.equal(classifyRisk('apps/mobile/src/components/Button.tsx').editsAllowed, 8);
   });
 
   it('should mark docs/research/*.md as guardrail-optional', () => {

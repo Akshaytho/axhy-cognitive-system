@@ -154,20 +154,20 @@ describe('AUDIT: Done approval → L1 allows done-memo write', () => {
     assert.equal(r.exitCode, 0, `Expected 0, stderr: ${r.stderr}`);
   });
 
-  it('done approval has 10min window (not 5min)', () => {
+  it('done approval has 20min window (not 5min)', () => {
     writeState(DONE_STATE_FILE, {
-      timestamp: Date.now() - 7 * 60 * 1000,
+      timestamp: Date.now() - 12 * 60 * 1000,
       type: 'done',
       approved_files: ['handoff/done-memos/memo.md'],
       edits_remaining: 1,
     });
     const r = runGuard('handoff/done-memos/memo.md');
-    assert.equal(r.exitCode, 0, 'Should still be valid at 7 minutes (10min window)');
+    assert.equal(r.exitCode, 0, 'Should still be valid at 12 minutes (20min window)');
   });
 
-  it('done approval expires after 10min', () => {
+  it('done approval expires after 20min', () => {
     writeState(DONE_STATE_FILE, {
-      timestamp: Date.now() - 11 * 60 * 1000,
+      timestamp: Date.now() - 21 * 60 * 1000,
       type: 'done',
       approved_files: ['handoff/done-memos/memo.md'],
       edits_remaining: 1,

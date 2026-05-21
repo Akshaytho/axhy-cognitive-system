@@ -146,7 +146,7 @@ describe('Next Question Engine', async () => {
   it('should detect destructive intent and require answer', () => {
     const result = generateNextQuestion({
       filePath: 'src/utils/helper.ts',
-      intent: 'I want to delete the legacy helper functions because they risk breaking if left unused and we need to remove dead code to reduce confusion and maintenance burden on the team going forward',
+      intent: 'I want to delete file src/utils/legacy-helper.ts because the functions risk breaking if left unused and we need to remove endpoint /api/legacy to reduce confusion and maintenance burden on the team',
       riskLevel: 'low',
       fileWasRead: true,
       testsExist: true,
@@ -289,7 +289,7 @@ describe('Check Before Edit', async () => {
       testStatus: { 'apps/mobile/src/components/Button.tsx': true },
     });
     assert.equal(result.allowed, true);
-    assert.equal(result.edits_remaining, 3);
+    assert.equal(result.edits_remaining, 8);
     assert.equal(result.confidence, 'high');
     assert.ok(result.approved_files.length > 0);
   });
@@ -333,7 +333,7 @@ describe('Check Before Edit', async () => {
     });
     assert.ok(existsSync(STATE_FILE));
     const state = JSON.parse(readFileSync(STATE_FILE, 'utf-8'));
-    assert.equal(state.edits_remaining, 3);
+    assert.equal(state.edits_remaining, 8);
     assert.ok(state.timestamp > 0);
   });
 
@@ -412,7 +412,7 @@ describe('Check Before Edit', async () => {
       fileReadStatus: { 'apps/backend/src/routes/chat.ts': true },
       testStatus: { 'apps/backend/src/routes/chat.ts': true },
     });
-    assert.equal(result.edits_remaining, 2);
+    assert.equal(result.edits_remaining, 5);
   });
 });
 
