@@ -16,7 +16,7 @@ import { resolve } from 'node:path';
 import { classifyRisk, isGuardrailOptional, isPlanFile, isDoneMemo } from './risk-classifier.mjs';
 import { logApprovalConsumed, logApprovalDenied, logApprovalExpired } from '../layer-2-guardrail/audit-log.mjs';
 
-const REPO_ROOT = process.env.AXHY_REPO_ROOT || process.cwd();
+const REPO_ROOT = process.env.CLAUDE_PROJECT_DIR || process.env.AXHY_REPO_ROOT || process.cwd();
 const REPO_HASH = createHash('md5').update(REPO_ROOT).digest('hex').slice(0, 8);
 const STATE_FILE = `/tmp/axhy-${REPO_HASH}-guardrail-state.json`;
 const PLAN_STATE_FILE = `/tmp/axhy-${REPO_HASH}-plan-guardrail-state.json`;
@@ -41,6 +41,25 @@ function allHashes() {
 function readJsonState(file) {
   if (!existsSync(file)) return null;
   try { return JSON.parse(readFileSync(file, 'utf-8')); } catch { return null; }
+}
+
+function readFromAny(file) {
+  // Read-side mirror of writeJsonState fanout (introduced 67089ba): state files are fanned
+  // out to /tmp/axhy-{hash}-{suffix} for every workspace hash. Scan all candidates and return
+  // the most-recent-timestamp valid state, so a state written from one cwd is findable from another.
+  const suffix = file.replace(/.*axhy-[a-f0-9]+-/, '');
+  let best = null;
+  let bestTs = -1;
+  for (const h of allHashes()) {
+    const candidate = `/tmp/axhy-${h}-${suffix}`;
+    if (!existsSync(candidate)) continue;
+    try {
+      const parsed = JSON.parse(readFileSync(candidate, 'utf-8'));
+      const ts = parsed && typeof parsed.timestamp === 'number' ? parsed.timestamp : 0;
+      if (ts > bestTs) { best = parsed; bestTs = ts; }
+    } catch {}
+  }
+  return best;
 }
 
 function writeJsonState(file, state) {
@@ -68,11 +87,21 @@ function allow() {
 }
 
 function checkGuardedFile(filePath, stateFile, windowMs, toolName) {
-  const state = readJsonState(stateFile);
+  const state = readFromAny(stateFile);
   if (!state) {
     block(
       `⛔ BLOCKED: No ${toolName} approval found.\n` +
       `You must call axhy_guardrail.${toolName} before writing this file.\n` +
+      `File: ${filePath}`
+    );
+    return;
+  }
+
+  const elapsed = Date.now() - (state.timestamp || 0);
+  if (elapsed > windowMs) {
+    block(
+      `⛔ BLOCKED: ${toolName} approval expired (${Math.round(elapsed / 1000)}s ago).\n` +
+      `Call ${toolName} again.\n` +
       `File: ${filePath}`
     );
     return;
@@ -99,16 +128,6 @@ function checkGuardedFile(filePath, stateFile, windowMs, toolName) {
     block(
       `⛔ BLOCKED: Edit limit reached for ${toolName}.\n` +
       `Call ${toolName} again for a fresh approval.\n` +
-      `File: ${filePath}`
-    );
-    return;
-  }
-
-  const elapsed = Date.now() - (state.timestamp || 0);
-  if (elapsed > windowMs) {
-    block(
-      `⛔ BLOCKED: ${toolName} approval expired (${Math.round(elapsed / 1000)}s ago).\n` +
-      `Call ${toolName} again.\n` +
       `File: ${filePath}`
     );
     return;
@@ -151,7 +170,7 @@ async function main() {
   }
 
   // 4-9. Code files — existing flow
-  const state = readJsonState(STATE_FILE);
+  const state = readFromAny(STATE_FILE);
   if (!state) {
     block(
       `⛔ BLOCKED: No guardrail approval found.\n` +

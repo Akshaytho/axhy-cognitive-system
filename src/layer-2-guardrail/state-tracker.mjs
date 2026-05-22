@@ -2,7 +2,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 
-const REPO_ROOT = process.env.AXHY_REPO_ROOT || process.cwd();
+const REPO_ROOT = process.env.CLAUDE_PROJECT_DIR || process.env.AXHY_REPO_ROOT || process.cwd();
 const REPO_HASH = createHash('md5').update(REPO_ROOT).digest('hex').slice(0, 8);
 const STATE_FILE = `/tmp/axhy-${REPO_HASH}-guardrail-state.json`;
 const READ_STATE_FILE = `/tmp/axhy-${REPO_HASH}-read-state.json`;

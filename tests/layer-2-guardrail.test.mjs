@@ -12,9 +12,24 @@ const REPO_HASH = createHash('md5').update(REPO_ROOT).digest('hex').slice(0, 8);
 const STATE_FILE = `/tmp/axhy-${REPO_HASH}-guardrail-state.json`;
 const READ_STATE_FILE = `/tmp/axhy-${REPO_HASH}-read-state.json`;
 
+const WORKSPACE_ROOTS = [
+  '/Users/thotaakshay/eclean_workspace',
+  '/Users/thotaakshay/eclean_workspace/axhy-v3',
+  '/Users/thotaakshay/eclean_workspace/axhy-cognitive-system',
+];
+
+function allHashes() {
+  const set = new Set([REPO_HASH]);
+  for (const r of WORKSPACE_ROOTS) set.add(createHash('md5').update(r).digest('hex').slice(0, 8));
+  return [...set];
+}
+
 function cleanState() {
-  if (existsSync(STATE_FILE)) unlinkSync(STATE_FILE);
-  if (existsSync(READ_STATE_FILE)) unlinkSync(READ_STATE_FILE);
+  for (const h of allHashes()) {
+    for (const suffix of ['guardrail-state.json', 'read-state.json', 'plan-guardrail-state.json', 'done-guardrail-state.json']) {
+      try { unlinkSync(`/tmp/axhy-${h}-${suffix}`); } catch {}
+    }
+  }
 }
 
 const VALID_INTENT = 'I want to update the chat route handler to add rate limiting for supervisor messages because the current implementation has no throttling which risks overwhelming the backend under load and could cause degraded performance for all users';

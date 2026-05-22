@@ -14,9 +14,23 @@ const AUDIT_LOG_FILE = `/tmp/axhy-${REPO_HASH}-audit.jsonl`;
 const BASH_GUARD = './src/layer-1-hook/bash-guard.mjs';
 const NODE = process.execPath;
 
+const WORKSPACE_ROOTS = [
+  '/Users/thotaakshay/eclean_workspace',
+  '/Users/thotaakshay/eclean_workspace/axhy-v3',
+  '/Users/thotaakshay/eclean_workspace/axhy-cognitive-system',
+];
+
+function allHashes() {
+  const set = new Set([REPO_HASH]);
+  for (const r of WORKSPACE_ROOTS) set.add(createHash('md5').update(r).digest('hex').slice(0, 8));
+  return [...set];
+}
+
 function cleanup() {
-  for (const f of [STATE_FILE, READ_STATE_FILE, PLAN_STATE_FILE, DONE_STATE_FILE, AUDIT_LOG_FILE]) {
-    try { unlinkSync(f); } catch {}
+  for (const h of allHashes()) {
+    for (const suffix of ['guardrail-state.json', 'read-state.json', 'plan-guardrail-state.json', 'done-guardrail-state.json', 'audit.jsonl']) {
+      try { unlinkSync(`/tmp/axhy-${h}-${suffix}`); } catch {}
+    }
   }
 }
 

@@ -17,9 +17,23 @@ const GUARD_SCRIPT = join(__dirname, '..', 'src', 'layer-1-hook', 'pre-edit-guar
 
 const VALID_INTENT = 'I want to update the chat route handler to add rate limiting for supervisor messages because the current implementation has no throttling which risks overwhelming the backend under load and could cause degraded performance for all users';
 
+const WORKSPACE_ROOTS = [
+  '/Users/thotaakshay/eclean_workspace',
+  '/Users/thotaakshay/eclean_workspace/axhy-v3',
+  '/Users/thotaakshay/eclean_workspace/axhy-cognitive-system',
+];
+
+function allHashes() {
+  const set = new Set([REPO_HASH]);
+  for (const r of WORKSPACE_ROOTS) set.add(createHash('md5').update(r).digest('hex').slice(0, 8));
+  return [...set];
+}
+
 function cleanAllState() {
-  for (const f of [STATE_FILE, READ_STATE_FILE, PLAN_STATE_FILE, DONE_STATE_FILE]) {
-    if (existsSync(f)) unlinkSync(f);
+  for (const h of allHashes()) {
+    for (const suffix of ['guardrail-state.json', 'read-state.json', 'plan-guardrail-state.json', 'done-guardrail-state.json']) {
+      try { unlinkSync(`/tmp/axhy-${h}-${suffix}`); } catch {}
+    }
   }
 }
 
