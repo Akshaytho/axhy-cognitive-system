@@ -10,7 +10,7 @@
  *  4-9. Code file? → check edit-guardrail state (existing flow)
  */
 
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { classifyRisk, isGuardrailOptional, isPlanFile, isDoneMemo } from './risk-classifier.mjs';
@@ -71,10 +71,29 @@ function writeJsonState(file, state) {
 }
 
 function wasFileReadRecently(filePath) {
-  const reads = readJsonState(READ_STATE_FILE) || {};
-  const lastRead = reads[filePath];
-  if (!lastRead) return false;
-  return (Date.now() - lastRead) < READ_WINDOW_MS;
+  // Glob every /tmp/axhy-*-read-state.json bucket: any cwd-shift (pnpm
+  // filter, expo CLI, playwright subagent) can land the Read in a hash
+  // bucket whose workspace-root isn't in WORKSPACE_ROOTS. Enumerating
+  // existing files is more robust than maintaining a hardcoded list.
+  // Every timestamp considered came from a real Read tool invocation.
+  let mostRecent = 0;
+  let candidates = [];
+  try {
+    const all = readdirSync('/tmp');
+    for (const name of all) {
+      if (name.startsWith('axhy-') && name.endsWith('-read-state.json')) {
+        candidates.push(`/tmp/${name}`);
+      }
+    }
+  } catch {}
+  for (const candidate of candidates) {
+    const reads = readJsonState(candidate);
+    if (!reads) continue;
+    const ts = reads[filePath];
+    if (typeof ts === 'number' && ts > mostRecent) mostRecent = ts;
+  }
+  if (!mostRecent) return false;
+  return (Date.now() - mostRecent) < READ_WINDOW_MS;
 }
 
 function block(reason) {
