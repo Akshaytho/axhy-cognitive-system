@@ -15,6 +15,7 @@ import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { classifyRisk, isGuardrailOptional, isPlanFile, isDoneMemo } from './risk-classifier.mjs';
 import { logApprovalConsumed, logApprovalDenied, logApprovalExpired } from '../layer-2-guardrail/audit-log.mjs';
+import { getWorkspaceRoots, getTimeouts } from '../shared/config.mjs';
 
 const REPO_ROOT = process.env.CLAUDE_PROJECT_DIR || process.env.AXHY_REPO_ROOT || process.cwd();
 const REPO_HASH = createHash('md5').update(REPO_ROOT).digest('hex').slice(0, 8);
@@ -22,15 +23,13 @@ const STATE_FILE = `/tmp/axhy-${REPO_HASH}-guardrail-state.json`;
 const PLAN_STATE_FILE = `/tmp/axhy-${REPO_HASH}-plan-guardrail-state.json`;
 const DONE_STATE_FILE = `/tmp/axhy-${REPO_HASH}-done-guardrail-state.json`;
 const READ_STATE_FILE = `/tmp/axhy-${REPO_HASH}-read-state.json`;
-const APPROVAL_WINDOW_MS = 15 * 60 * 1000;
-const DONE_APPROVAL_WINDOW_MS = 20 * 60 * 1000;
-const READ_WINDOW_MS = 10 * 60 * 1000;
 
-const WORKSPACE_ROOTS = [
-  '/Users/thotaakshay/eclean_workspace',
-  '/Users/thotaakshay/eclean_workspace/axhy-v3',
-  '/Users/thotaakshay/eclean_workspace/axhy-cognitive-system',
-];
+const _timeouts = getTimeouts();
+const APPROVAL_WINDOW_MS = _timeouts.approval_window_ms;
+const DONE_APPROVAL_WINDOW_MS = _timeouts.done_approval_window_ms;
+const READ_WINDOW_MS = _timeouts.read_window_ms;
+
+const WORKSPACE_ROOTS = getWorkspaceRoots();
 
 function allHashes() {
   const set = new Set([REPO_HASH]);
@@ -189,6 +188,7 @@ async function main() {
   }
 
   // 4-9. Code files — existing flow
+  // Check order matches checkGuardedFile: exists → expiry → scope → read → limit → question
   const state = readFromAny(STATE_FILE);
   if (!state) {
     block(
@@ -196,6 +196,12 @@ async function main() {
       `You must call axhy_guardrail.check_before_edit before editing code files.\n` +
       `File: ${filePath}`
     );
+    return;
+  }
+
+  const elapsed = Date.now() - (state.timestamp || 0);
+  if (elapsed > APPROVAL_WINDOW_MS) {
+    block(`⛔ BLOCKED: Approval expired (${Math.round(elapsed / 1000)}s ago).\nCall check_before_edit again.\nFile: ${filePath}`);
     return;
   }
 
@@ -227,12 +233,6 @@ async function main() {
 
   if ((state.edits_remaining || 0) <= 0) {
     block(`⛔ BLOCKED: Edit limit reached.\nCall check_before_edit again.\nFile: ${filePath}`);
-    return;
-  }
-
-  const elapsed = Date.now() - (state.timestamp || 0);
-  if (elapsed > APPROVAL_WINDOW_MS) {
-    block(`⛔ BLOCKED: Approval expired (${Math.round(elapsed / 1000)}s ago).\nCall check_before_edit again.\nFile: ${filePath}`);
     return;
   }
 

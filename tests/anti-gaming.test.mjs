@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { execSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync, unlinkSync, appendFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { getWorkspaceRoots } from '../src/shared/config.mjs';
 
 const REPO_ROOT = process.cwd();
 const REPO_HASH = createHash('md5').update(REPO_ROOT).digest('hex').slice(0, 8);
@@ -14,11 +15,7 @@ const AUDIT_LOG_FILE = `/tmp/axhy-${REPO_HASH}-audit.jsonl`;
 const BASH_GUARD = './src/layer-1-hook/bash-guard.mjs';
 const NODE = process.execPath;
 
-const WORKSPACE_ROOTS = [
-  '/Users/thotaakshay/eclean_workspace',
-  '/Users/thotaakshay/eclean_workspace/axhy-v3',
-  '/Users/thotaakshay/eclean_workspace/axhy-cognitive-system',
-];
+const WORKSPACE_ROOTS = getWorkspaceRoots();
 
 function allHashes() {
   const set = new Set([REPO_HASH]);

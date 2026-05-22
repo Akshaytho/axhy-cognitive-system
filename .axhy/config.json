@@ -1,0 +1,17 @@
+{
+  "workspace_roots": [
+    "/Users/thotaakshay/eclean_workspace",
+    "/Users/thotaakshay/eclean_workspace/axhy-v3",
+    "/Users/thotaakshay/eclean_workspace/axhy-cognitive-system"
+  ],
+  "timeouts": {
+    "approval_window_ms": 900000,
+    "done_approval_window_ms": 1200000,
+    "read_window_ms": 600000
+  },
+  "budgets": {
+    "high_risk_edits": 1,
+    "medium_risk_edits": 5,
+    "low_risk_edits": 8
+  }
+}

@@ -1,31 +1,22 @@
-const MIN_WORD_COUNT = 30;
+/**
+ * Intent Validator — simplified.
+ *
+ * Validates that the intent string meets minimum quality standards.
+ * Keyword-based pattern matching was removed (Goodhart's Law: it trained
+ * vocabulary performance, not genuine reasoning). Structured reasoning
+ * evidence is now validated separately by evidence-validator.mjs.
+ *
+ * What remains: length check (forces the AI to write enough to think)
+ * and basic presence validation.
+ */
 
-const REQUIRED_ASPECTS = [
-  {
-    name: 'purpose',
-    patterns: [
-      /\b(to|in order to|so that|because|for|adding|removing|changing|fixing|updating|implementing|creating)\b/i,
-    ],
-  },
-  {
-    name: 'affected_behavior',
-    patterns: [
-      /\b(will|should|changes?|affects?|modif\w*|updat\w*|alter\w*|impacts?|enables?|disables?)\b/i,
-    ],
-  },
-  {
-    name: 'risk',
-    patterns: [
-      /\b(risk\w*|careful|danger\w*|regression|side.?effect|concern|caveat|assumption|depend\w*|migration|break(?:s|ing)?(?:\s+\w+)?(?:\s+if|\s+when)?)\b/i,
-    ],
-  },
-];
+const MIN_WORD_COUNT = 30;
 
 export function validateIntent(intent) {
   if (!intent || typeof intent !== 'string') {
     return {
       valid: false,
-      reason: 'Intent is required. Describe WHAT you want to change, WHY, and what RISK exists.',
+      reason: 'Intent is required. Describe WHAT you want to change and WHY.',
     };
   }
 
@@ -33,20 +24,7 @@ export function validateIntent(intent) {
   if (words.length < MIN_WORD_COUNT) {
     return {
       valid: false,
-      reason: `Intent too short (${words.length} words, need ${MIN_WORD_COUNT}+). Include: purpose, affected behavior, and risk assessment.`,
-    };
-  }
-
-  const missing = [];
-  for (const aspect of REQUIRED_ASPECTS) {
-    const found = aspect.patterns.some(p => p.test(intent));
-    if (!found) missing.push(aspect.name);
-  }
-
-  if (missing.length > 0) {
-    return {
-      valid: false,
-      reason: `Intent missing: ${missing.join(', ')}. A valid intent describes purpose (why), affected behavior (what changes), and risk (what could break).`,
+      reason: `Intent too short (${words.length} words, need ${MIN_WORD_COUNT}+). Describe what you are changing, why, and what could go wrong.`,
     };
   }
 

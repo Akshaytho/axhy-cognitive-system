@@ -1,6 +1,7 @@
 
 import { classifyRisk } from '../layer-1-hook/risk-classifier.mjs';
 import { validateIntent } from './intent-validator.mjs';
+import { validateEvidence, getRequiredFields } from './evidence-validator.mjs';
 import { suggestMaturity } from './maturity-selector.mjs';
 import { generateNextQuestion, validateAnswer } from './next-question.mjs';
 import { calculateConfidence } from './confidence.mjs';
@@ -17,6 +18,7 @@ export function checkBeforeEdit({
   changeType,
   answeredQuestion,
   evidence,
+  reasoningEvidence,
   fileReadStatus = {},
   testStatus = {},
   impactCheckResult = null,
@@ -30,7 +32,7 @@ export function checkBeforeEdit({
     return {
       allowed: false,
       reason: intentResult.reason,
-      suggestion: 'Rewrite your intent with 30+ words covering: purpose, affected behavior, and risk.',
+      suggestion: 'Rewrite your intent with 30+ words describing what you are changing and why.',
     };
   }
 
@@ -43,6 +45,24 @@ export function checkBeforeEdit({
 
   const primaryFile = filePaths[0];
   const risk = classifyRisk(primaryFile);
+
+  // Validate structured reasoning evidence for medium/high risk files.
+  // If reasoning_evidence is provided, use the new validator.
+  // If not provided (backward compat), allow with a warning for medium risk,
+  // but still require for high risk in the future (currently lenient).
+  if (reasoningEvidence && (risk.level === 'high' || risk.level === 'medium')) {
+    const evidenceResult = validateEvidence(reasoningEvidence, risk.level);
+    if (!evidenceResult.valid) {
+      return {
+        allowed: false,
+        reason: evidenceResult.reason,
+        suggestion: evidenceResult.guidance
+          ? `Provide reasoning evidence:\n${evidenceResult.guidance}`
+          : 'Provide substantive structured reasoning evidence.',
+        required_evidence: getRequiredFields(risk.level),
+      };
+    }
+  }
   const maturity = suggestMaturity({ filePath: primaryFile, changeType, intent });
 
   const fileWasRead = fileReadStatus[primaryFile] !== false;

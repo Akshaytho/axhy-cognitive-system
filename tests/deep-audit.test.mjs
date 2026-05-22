@@ -5,6 +5,7 @@ import { join, dirname, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
+import { getWorkspaceRoots } from '../src/shared/config.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
@@ -17,11 +18,7 @@ const GUARD_SCRIPT = join(__dirname, '..', 'src', 'layer-1-hook', 'pre-edit-guar
 
 const VALID_INTENT = 'I want to update the chat route handler to add rate limiting for supervisor messages because the current implementation has no throttling which risks overwhelming the backend under load and could cause degraded performance for all users';
 
-const WORKSPACE_ROOTS = [
-  '/Users/thotaakshay/eclean_workspace',
-  '/Users/thotaakshay/eclean_workspace/axhy-v3',
-  '/Users/thotaakshay/eclean_workspace/axhy-cognitive-system',
-];
+const WORKSPACE_ROOTS = getWorkspaceRoots();
 
 function allHashes() {
   const set = new Set([REPO_HASH]);
@@ -454,14 +451,15 @@ describe('AUDIT: Intent validator edge cases', async () => {
     join(__dirname, '..', 'src', 'layer-2-guardrail', 'intent-validator.mjs')
   );
 
-  it('rejects intent with no risk words', () => {
+  it('accepts 30+ word intent without keyword requirements (keyword matching removed)', () => {
+    // Keyword regex was removed — Goodhart's Law. Evidence validator handles reasoning quality now.
     const result = validateIntent('I want to update the button component to change the color from blue to green because the design spec says so and it will look better and match the brand');
-    assert.equal(result.valid, false);
-    assert.ok(result.reason.includes('risk'));
+    assert.equal(result.valid, true);
   });
 
-  it('accepts intent with all three aspects', () => {
-    const result = validateIntent('I want to update the route handler to add validation because the current implementation accepts any input which risks allowing injection attacks and could break the entire database if exploited');
-    assert.equal(result.valid, true);
+  it('still rejects intent under 30 words', () => {
+    const result = validateIntent('quick fix to the button color');
+    assert.equal(result.valid, false);
+    assert.match(result.reason, /too short/i);
   });
 });

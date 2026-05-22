@@ -1,6 +1,7 @@
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { getWorkspaceRoots } from '../shared/config.mjs';
 
 const REPO_ROOT = process.env.CLAUDE_PROJECT_DIR || process.env.AXHY_REPO_ROOT || process.cwd();
 const REPO_HASH = createHash('md5').update(REPO_ROOT).digest('hex').slice(0, 8);
@@ -9,11 +10,7 @@ const READ_STATE_FILE = `/tmp/axhy-${REPO_HASH}-read-state.json`;
 const PLAN_STATE_FILE = `/tmp/axhy-${REPO_HASH}-plan-guardrail-state.json`;
 const DONE_STATE_FILE = `/tmp/axhy-${REPO_HASH}-done-guardrail-state.json`;
 
-const WORKSPACE_ROOTS = [
-  '/Users/thotaakshay/eclean_workspace',
-  '/Users/thotaakshay/eclean_workspace/axhy-v3',
-  '/Users/thotaakshay/eclean_workspace/axhy-cognitive-system',
-];
+const WORKSPACE_ROOTS = getWorkspaceRoots();
 
 function allHashes() {
   const set = new Set([REPO_HASH]);

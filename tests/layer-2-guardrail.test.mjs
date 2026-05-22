@@ -5,6 +5,7 @@ import { join, dirname, resolve } from 'node:path';
 
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
+import { getWorkspaceRoots } from '../src/shared/config.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -12,11 +13,7 @@ const REPO_HASH = createHash('md5').update(REPO_ROOT).digest('hex').slice(0, 8);
 const STATE_FILE = `/tmp/axhy-${REPO_HASH}-guardrail-state.json`;
 const READ_STATE_FILE = `/tmp/axhy-${REPO_HASH}-read-state.json`;
 
-const WORKSPACE_ROOTS = [
-  '/Users/thotaakshay/eclean_workspace',
-  '/Users/thotaakshay/eclean_workspace/axhy-v3',
-  '/Users/thotaakshay/eclean_workspace/axhy-cognitive-system',
-];
+const WORKSPACE_ROOTS = getWorkspaceRoots();
 
 function allHashes() {
   const set = new Set([REPO_HASH]);
@@ -58,16 +55,95 @@ describe('Intent Validator', async () => {
     assert.match(result.reason, /too short/i);
   });
 
-  it('should reject intent missing risk aspect', () => {
-    const noRisk = 'I want to update the chat route handler to add rate limiting for supervisor messages because the current implementation has no throttling which will change the behavior of message sending for all users in the system significantly';
-    const result = validateIntent(noRisk);
-    assert.equal(result.valid, false);
-    assert.match(result.reason, /risk/i);
+  it('should accept any 30+ word intent (keyword matching removed)', () => {
+    // Keyword-based validation was removed — Goodhart's Law made it train
+    // vocabulary performance, not reasoning. Structured evidence validation
+    // now handles reasoning quality (see Evidence Validator tests below).
+    const noKeywords = 'I want to update the chat route handler to add rate limiting for supervisor messages because the current implementation has no throttling which will change the behavior of message sending for all users in the system significantly';
+    const result = validateIntent(noKeywords);
+    assert.equal(result.valid, true);
   });
 
   it('should accept well-formed intent with all aspects', () => {
     const result = validateIntent(VALID_INTENT);
     assert.equal(result.valid, true);
+  });
+});
+
+describe('Evidence Validator', async () => {
+  const { validateEvidence, getRequiredFields } = await import(
+    join(__dirname, '..', 'src', 'layer-2-guardrail', 'evidence-validator.mjs')
+  );
+
+  it('should require evidence object for high-risk', () => {
+    const result = validateEvidence(null, 'high');
+    assert.equal(result.valid, false);
+    assert.ok(result.missing.length > 0);
+  });
+
+  it('should require all 4 fields for high-risk', () => {
+    const fields = getRequiredFields('high');
+    assert.deepEqual(fields, ['invariants_preserved', 'risk_if_wrong', 'what_would_make_me_stop', 'files_read']);
+  });
+
+  it('should require 3 fields for medium-risk', () => {
+    const fields = getRequiredFields('medium');
+    assert.deepEqual(fields, ['risk_if_wrong', 'why_this_path_is_safe', 'files_read']);
+  });
+
+  it('should require only files_read for low-risk', () => {
+    const fields = getRequiredFields('low');
+    assert.deepEqual(fields, ['files_read']);
+  });
+
+  it('should reject evidence with missing fields', () => {
+    const result = validateEvidence({ files_read: ['foo.ts'] }, 'high');
+    assert.equal(result.valid, false);
+    assert.ok(result.missing.includes('invariants_preserved'));
+  });
+
+  it('should reject evidence fields under 10 words', () => {
+    const result = validateEvidence({
+      invariants_preserved: 'stays intact',
+      risk_if_wrong: 'things break',
+      what_would_make_me_stop: 'bad stuff',
+      files_read: ['foo.ts'],
+    }, 'high');
+    assert.equal(result.valid, false);
+    assert.match(result.reason, /too brief/i);
+  });
+
+  it('should reject evidence lacking specific references', () => {
+    const result = validateEvidence({
+      invariants_preserved: 'the existing behavior of the system stays completely intact and nothing will change at all anywhere ever',
+      risk_if_wrong: 'if my assumptions are incorrect then the whole system would break and users would be affected badly everywhere',
+      what_would_make_me_stop: 'if I find that the change impacts other parts of the codebase in unexpected ways that I did not anticipate beforehand',
+      files_read: ['foo.ts'],
+    }, 'high');
+    assert.equal(result.valid, false);
+    assert.match(result.reason, /specificity/i);
+  });
+
+  it('should accept valid high-risk evidence with specific references', () => {
+    const result = validateEvidence({
+      invariants_preserved: 'Multi-tenant isolation via companyId filter on line 47 of chat.ts stays intact because my change only adds rate limiting above the query layer',
+      risk_if_wrong: 'If the rate limiter throws before the auth check in middleware/auth.ts then unauthenticated requests could consume rate budget for legitimate users',
+      what_would_make_me_stop: 'If I find any path where the rate limit check runs outside the authenticated middleware chain in routes/chat.ts I would halt immediately',
+      files_read: ['apps/backend/src/routes/chat.ts', 'apps/backend/src/middleware/auth.ts'],
+    }, 'high');
+    assert.equal(result.valid, true);
+  });
+
+  it('should accept valid low-risk evidence with just files_read', () => {
+    const result = validateEvidence({
+      files_read: ['apps/mobile/src/components/Button.tsx'],
+    }, 'low');
+    assert.equal(result.valid, true);
+  });
+
+  it('should reject empty files_read array', () => {
+    const result = validateEvidence({ files_read: [] }, 'low');
+    assert.equal(result.valid, false);
   });
 });
 

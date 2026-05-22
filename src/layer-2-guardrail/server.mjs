@@ -44,6 +44,33 @@ const EDIT_TOOL_DEFINITION = {
         items: { type: 'string' },
         description: 'Evidence supporting your answer (file paths, grep results, test outputs).',
       },
+      reasoning_evidence: {
+        type: 'object',
+        description: 'Structured reasoning evidence. Required fields depend on file risk level. HIGH: invariants_preserved, risk_if_wrong, what_would_make_me_stop, files_read. MEDIUM: risk_if_wrong, why_this_path_is_safe, files_read. LOW: files_read only.',
+        properties: {
+          invariants_preserved: {
+            type: 'string',
+            description: 'What existing behavior stays intact and why your change does not break it (10+ words with specific references).',
+          },
+          risk_if_wrong: {
+            type: 'string',
+            description: 'What breaks if your assumptions are incorrect (10+ words with specific references).',
+          },
+          what_would_make_me_stop: {
+            type: 'string',
+            description: 'Conditions that would cause you to halt and re-evaluate (10+ words with specific references).',
+          },
+          why_this_path_is_safe: {
+            type: 'string',
+            description: 'Evidence that this approach will not cause harm (10+ words with specific references).',
+          },
+          files_read: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'List of files you actually read before forming this intent.',
+          },
+        },
+      },
     },
     required: ['intent', 'file_paths'],
   },
@@ -105,7 +132,7 @@ function getFileReadStatus(filePaths) {
   return status;
 }
 
-export async function handleEditToolCall({ intent, file_paths, change_type, answered_question, evidence }) {
+export async function handleEditToolCall({ intent, file_paths, change_type, answered_question, evidence, reasoning_evidence }) {
   let impactResult = null;
   if (intent && !answered_question) {
     try {
@@ -136,6 +163,7 @@ export async function handleEditToolCall({ intent, file_paths, change_type, answ
     changeType: change_type,
     answeredQuestion: answered_question,
     evidence,
+    reasoningEvidence: reasoning_evidence,
     fileReadStatus: getFileReadStatus(file_paths || []),
     testStatus: {},
     impactCheckResult: impactResult,

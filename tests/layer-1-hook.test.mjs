@@ -6,6 +6,7 @@ import { join, dirname, resolve } from 'node:path';
 
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
+import { getWorkspaceRoots } from '../src/shared/config.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const GUARD_SCRIPT = join(__dirname, '..', 'src', 'layer-1-hook', 'pre-edit-guard.mjs');
@@ -14,11 +15,7 @@ const REPO_HASH = createHash('md5').update(REPO_ROOT).digest('hex').slice(0, 8);
 const STATE_FILE = `/tmp/axhy-${REPO_HASH}-guardrail-state.json`;
 const READ_STATE_FILE = `/tmp/axhy-${REPO_HASH}-read-state.json`;
 
-const WORKSPACE_ROOTS = [
-  '/Users/thotaakshay/eclean_workspace',
-  '/Users/thotaakshay/eclean_workspace/axhy-v3',
-  '/Users/thotaakshay/eclean_workspace/axhy-cognitive-system',
-];
+const WORKSPACE_ROOTS = getWorkspaceRoots();
 
 function allHashes() {
   const set = new Set([REPO_HASH]);
