@@ -1,8 +1,13 @@
 import { execFileSync } from 'node:child_process';
 
+// Only WILDCARD-BYPASS tags count toward the gaming-detection budget.
+// Design-intent tags (such as raw-ok, stream-ok, learned-ok, auth-exempt,
+// tenant-exempt) document approved departures and are not gaming. This
+// list mirrors packages/ai-tools/src/session-audit.ts SKIP_PATTERNS.
 const SKIP_PATTERNS = [
-  '// audit-ok', '// raw-ok', '// stream-ok', '// budget-exempt',
-  '// learned-ok', '// auth-exempt', '// tenant-exempt', '// apply-ok',
+  '// audit-ok',
+  '// budget-exempt',
+  '// apply-ok',
 ];
 
 const GAMING_KEYWORDS = [
