@@ -7,7 +7,10 @@ import { checkBeforePlan } from './check-before-plan.mjs';
 import { checkBeforeDone } from './check-before-done.mjs';
 import { checkBeforeBuild } from './check-before-build.mjs';
 import { checkBeforeCommit } from './check-before-commit.mjs';
-import { impactCheck, loadRealImpactCheck, isConnected } from './impact-adapter.mjs';
+import {
+  impactCheck, loadRealImpactCheck, isConnected,
+  impactSearch, impactTimeline, impactGet, impactActivitySearch,
+} from './impact-adapter.mjs';
 import { classifyRisk } from '../layer-1-hook/risk-classifier.mjs';
 import { logApprovalCreated, logApprovalDenied } from './audit-log.mjs';
 import {
@@ -420,7 +423,59 @@ export async function handleCommitToolCall(args) {
   });
 }
 
-export { EDIT_TOOL_DEFINITION, PLAN_TOOL_DEFINITION, DONE_TOOL_DEFINITION, BUILD_TOOL_DEFINITION, COMMIT_TOOL_DEFINITION };
+const SEARCH_TOOL_DEFINITION = {
+  name: 'impact_search',
+  description: 'Search the axhy brain for relevant entries. Returns snippet-only results (≤200 chars) with authority filtering. Default: curated entries only (locked/curated/candidate). Use include_evidence=true for migrated claude-mem data, include_activity=true for session activity. Use impact_get to fetch full content of specific results.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      query: { type: 'string', description: 'Natural language search query.' },
+      kind: { type: 'array', items: { type: 'string' }, description: 'Filter by kind (curated/activity/change/migrated). Default: [curated].' },
+      authority_level: { type: 'array', items: { type: 'string' }, description: 'Filter by authority (locked/curated/candidate/evidence/activity). Default: [locked, curated, candidate].' },
+      include_evidence: { type: 'boolean', description: 'Include migrated claude-mem entries (kind=migrated, authority=evidence). Default: false.' },
+      include_activity: { type: 'boolean', description: 'Include session activity entries. Default: false.' },
+      include_history: { type: 'boolean', description: 'Include superseded (old-version) entries. Default: false.' },
+      type: { type: 'array', items: { type: 'string' }, description: 'Filter by entry type (retro/learning/locked_doc/spec/decision/etc).' },
+      concepts: { type: 'array', items: { type: 'string' }, description: 'Filter by concept tags (auth, state-machine, schema, etc).' },
+      limit: { type: 'number', description: 'Max results. Default: 20.' },
+      order_by: { type: 'string', enum: ['relevance', 'recency'], description: 'Sort order. Default: relevance.' },
+    },
+    required: ['query'],
+  },
+};
+
+const TIMELINE_TOOL_DEFINITION = {
+  name: 'impact_timeline',
+  description: 'Get entries before and after a specific brain entry in time, filtered by shared concepts. Useful for understanding the temporal context around a decision or learning.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      anchor_id: { type: 'string', description: 'UUID of the anchor entry.' },
+      depth_before: { type: 'number', description: 'Number of entries before anchor. Default: 5.' },
+      depth_after: { type: 'number', description: 'Number of entries after anchor. Default: 5.' },
+      concepts: { type: 'array', items: { type: 'string' }, description: 'Filter by concepts. Default: uses anchor entry concepts.' },
+    },
+    required: ['anchor_id'],
+  },
+};
+
+const GET_TOOL_DEFINITION = {
+  name: 'impact_get',
+  description: 'Fetch full content of specific brain entries by ID. Use after impact_search to get complete content of entries that matter. Returns full content, metadata, and provenance.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      ids: { type: 'array', items: { type: 'string' }, description: 'UUIDs of entries to fetch.' },
+    },
+    required: ['ids'],
+  },
+};
+
+export {
+  EDIT_TOOL_DEFINITION, PLAN_TOOL_DEFINITION, DONE_TOOL_DEFINITION,
+  BUILD_TOOL_DEFINITION, COMMIT_TOOL_DEFINITION,
+  SEARCH_TOOL_DEFINITION, TIMELINE_TOOL_DEFINITION, GET_TOOL_DEFINITION,
+};
 
 function send(msg) {
   const json = JSON.stringify(msg);
@@ -437,7 +492,7 @@ function handleMessage(msg) {
       result: {
         protocolVersion: '2024-11-05',
         capabilities: { tools: {} },
-        serverInfo: { name: 'axhy-guardrail', version: '0.4.0' },
+        serverInfo: { name: 'axhy-guardrail', version: '0.5.0' },
       },
     });
   }
@@ -448,7 +503,11 @@ function handleMessage(msg) {
     return send({
       jsonrpc: '2.0',
       id,
-      result: { tools: [EDIT_TOOL_DEFINITION, PLAN_TOOL_DEFINITION, DONE_TOOL_DEFINITION, BUILD_TOOL_DEFINITION, COMMIT_TOOL_DEFINITION] },
+      result: { tools: [
+        EDIT_TOOL_DEFINITION, PLAN_TOOL_DEFINITION, DONE_TOOL_DEFINITION,
+        BUILD_TOOL_DEFINITION, COMMIT_TOOL_DEFINITION,
+        SEARCH_TOOL_DEFINITION, TIMELINE_TOOL_DEFINITION, GET_TOOL_DEFINITION,
+      ] },
     });
   }
 
@@ -467,6 +526,12 @@ function handleMessage(msg) {
       handler = handleBuildToolCall(args);
     } else if (toolName === 'check_before_commit') {
       handler = handleCommitToolCall(args);
+    } else if (toolName === 'impact_search') {
+      handler = impactSearch(args);
+    } else if (toolName === 'impact_timeline') {
+      handler = impactTimeline(args);
+    } else if (toolName === 'impact_get') {
+      handler = impactGet(args);
     } else {
       return send({
         jsonrpc: '2.0',
