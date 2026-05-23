@@ -23,15 +23,30 @@ const SOURCE_EXTS = ['.ts', '.tsx', '.mjs', '.js', '.jsx'];
 const IMPORT_REGEX = /^\s*import\s+(?:[^'"]*\s+from\s+)?['"]([^'"]+)['"]/gm;
 const REQUIRE_REGEX = /\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
 
+/**
+ * Strip backtick template literal CONTENT before regex scanning.
+ * Calibration fix: test files have `const content = \`import { foo } from './foo';\``
+ * — those are test fixtures, not real imports. Replace template content with
+ * empty templates, preserving line breaks so other tooling stays line-accurate.
+ */
+function stripTemplateLiterals(content) {
+  return content.replace(/`(?:\\.|[^`\\])*`/gs, (match) => {
+    const newlines = (match.match(/\n/g) || []).length;
+    return '``' + '\n'.repeat(newlines);
+  });
+}
+
 function extractImports(content) {
   const imports = new Set();
+  // Calibration fix: strip template literals so `import...` inside tests isn't matched
+  const cleaned = stripTemplateLiterals(content);
   let match;
   IMPORT_REGEX.lastIndex = 0;
-  while ((match = IMPORT_REGEX.exec(content)) !== null) {
+  while ((match = IMPORT_REGEX.exec(cleaned)) !== null) {
     imports.add(match[1]);
   }
   REQUIRE_REGEX.lastIndex = 0;
-  while ((match = REQUIRE_REGEX.exec(content)) !== null) {
+  while ((match = REQUIRE_REGEX.exec(cleaned)) !== null) {
     imports.add(match[1]);
   }
   return [...imports];

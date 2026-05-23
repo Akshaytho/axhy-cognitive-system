@@ -351,7 +351,14 @@ describe('orchestrator: end-to-end pass and block', () => {
   });
 
   it('blocks when blocker-severity findings exist', () => {
-    const f = makeFile('bad/silent.ts', `try { run(); } catch (e) {}`);
+    // Use unhandled_async (still a blocker) — silent_catch was downgraded to warning
+    // after calibration since silent catches are often intentional best-effort writes.
+    const f = makeFile('bad/unhandled.ts', `
+async function broken() {
+  const data = await fetch('/api/x');
+  return data;
+}
+`);
     const result = checkBeforeCommit({
       sliceName: 'block-test',
       changedFiles: [f],
@@ -395,8 +402,14 @@ describe('orchestrator: end-to-end pass and block', () => {
   });
 
   it('founder-approved deferrals move blockers out of active list', () => {
-    const f = makeFile('bad/d.ts', `try { q(); } catch (e) {}`);
-    const findingId = `silent_catch:${f}:1`;
+    // Use unhandled_async (blocker) since silent_catch became a warning post-calibration.
+    const f = makeFile('bad/d.ts', `
+async function broken() {
+  const data = await fetch('/api/x');
+  return data;
+}
+`);
+    const findingId = `unhandled_async:${f}:2`;
     const result = checkBeforeCommit({
       sliceName: 'defer-test',
       changedFiles: [f],
@@ -405,5 +418,120 @@ describe('orchestrator: end-to-end pass and block', () => {
     });
     assert.equal(result.passed, true);
     assert.equal(result.deferred_blockers.length, 1);
+  });
+});
+
+describe('calibration fixes from real-world validation', () => {
+  it('does NOT flag async main() when caller uses .catch() handler', () => {
+    const f = makeFile('script.mjs', `
+async function main() {
+  const data = await fetch('/api/foo');
+  return data.json();
+}
+
+main().catch(err => process.exit(1));
+`);
+    const groups = scanPatterns([f]);
+    const asyncGroup = groups.find(g => g.pattern === 'unhandled_async');
+    assert.ok(!asyncGroup || asyncGroup.occurrences.length === 0,
+      'main().catch() pattern should be recognized as a valid error handler');
+  });
+
+  it('recognizes catch with no parens (ES2019 optional binding) as handled', () => {
+    const f = makeFile('catch-no-parens.ts', `
+async function fetcher() {
+  try {
+    const data = await fetch('/api/x');
+    return data;
+  } catch {
+    return null;
+  }
+}
+`);
+    const groups = scanPatterns([f]);
+    const asyncGroup = groups.find(g => g.pattern === 'unhandled_async');
+    assert.ok(!asyncGroup || asyncGroup.occurrences.length === 0,
+      'catch { ... } without parens should count as a handler');
+  });
+
+  it('does NOT flag async functions inside template literals (test fixtures)', () => {
+    // Use array.join to avoid backtick-in-backtick escape problems.
+    const bt = '`';
+    const f = makeFile('test-fixture.test.mjs', [
+      'const fixture = ' + bt,
+      'async function broken() {',
+      "  const data = await fetch('/api/x');",
+      '  return data;',
+      '}',
+      bt + ';',
+      "const otherFn = async () => 'safe';",
+    ].join('\n'));
+    const groups = scanPatterns([f]);
+    const asyncGroup = groups.find(g => g.pattern === 'unhandled_async');
+    assert.ok(!asyncGroup || asyncGroup.occurrences.length === 0,
+      'async inside template literal is a fixture, not real code');
+  });
+
+  it('does NOT flag broken imports inside template literals', () => {
+    const bt = '`';
+    const f = makeFile('test-imports.test.mjs', [
+      'const sample = ' + bt,
+      "import { foo } from './nonexistent';",
+      "import bar from '../also-fake';",
+      bt + ';',
+    ].join('\n'));
+    const result = scanDependencies([f], workDir);
+    assert.equal(result.broken_imports.length, 0,
+      'imports inside template literals are test fixtures, not real imports');
+  });
+
+  it('does NOT fire silent_catch on .test.mjs files (intentional cleanup)', () => {
+    const f = makeFile('cleanup.test.mjs', `
+function cleanState() {
+  try { unlinkSync('/tmp/foo') } catch {}
+  try { unlinkSync('/tmp/bar') } catch {}
+}
+`);
+    const groups = scanPatterns([f]);
+    const silentGroup = groups.find(g => g.pattern === 'silent_catch');
+    assert.ok(!silentGroup || silentGroup.occurrences.length === 0,
+      'test cleanup empty catches are intentional');
+  });
+
+  it('DOES still fire silent_catch on production source files', () => {
+    const f = makeFile('production.ts', `
+function unsafe() {
+  try { runCriticalThing(); } catch {}
+}
+`);
+    const groups = scanPatterns([f]);
+    const silentGroup = groups.find(g => g.pattern === 'silent_catch');
+    assert.ok(silentGroup && silentGroup.occurrences.length > 0,
+      'production silent catches must still be flagged');
+  });
+
+  it('does NOT flag TODO inside string literals or regex', () => {
+    const f = makeFile('scanner.ts', `
+const TODO_PATTERN = /\\\\b(TODO|FIXME|XXX|HACK)\\\\b/;
+const message = 'Search for TODO comments';
+const real_code = 'no comment here';
+`);
+    const groups = scanPatterns([f]);
+    const todoGroup = groups.find(g => g.pattern === 'todo_in_committed_code');
+    assert.ok(!todoGroup || todoGroup.occurrences.length === 0,
+      'TODO inside string/regex literals should not be flagged');
+  });
+
+  it('DOES still flag real TODO comments', () => {
+    const f = makeFile('with-todo.ts', `
+function foo() {
+  // TODO: implement this properly
+  return null;
+}
+`);
+    const groups = scanPatterns([f]);
+    const todoGroup = groups.find(g => g.pattern === 'todo_in_committed_code');
+    assert.ok(todoGroup && todoGroup.occurrences.length > 0,
+      'real TODO comments must still be flagged');
   });
 });

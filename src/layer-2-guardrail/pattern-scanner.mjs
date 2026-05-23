@@ -49,9 +49,14 @@ const PATTERNS = [
   },
   {
     id: 'silent_catch',
-    severity: 'blocker',
-    description: 'catch block that swallows errors without logging or re-throwing',
+    // Calibration: empty catches are SOMETIMES bugs and SOMETIMES intentional
+    // best-effort cleanup. Marked as warning (not blocker) so founder can triage.
+    // To make a silent catch valid, add: a comment explaining intent, `continue`,
+    // `break`, a return statement, log call, or throw. Empty catch alone gets flagged.
+    severity: 'warning',
+    description: 'catch block that swallows errors without logging, re-throwing, or documenting intent',
     filePattern: /\.(ts|tsx|mjs|js|jsx)$/,
+    skipPattern: /\.test\.(ts|tsx|mjs|js|jsx)$|\/tests?\/|pre-commit\.mjs$|commit-msg\.mjs$/,
     scan: scanSilentCatch,
   },
   {
@@ -81,7 +86,10 @@ const PATTERNS = [
 
 function scanUnhandledAsync(content, filePath) {
   const findings = [];
-  const lines = content.split('\n');
+  // Calibration fix: strip template literal content. Tests embed async function
+  // declarations inside backtick strings as fixtures — those are not real code.
+  const cleaned = stripTemplateLiterals(content);
+  const lines = cleaned.split('\n');
   // Match async function declarations or async arrow functions
   const asyncFnRegex = /^(\s*)(?:export\s+)?(?:async\s+function\s+(\w+)|const\s+(\w+)\s*[:=]\s*async\s*(?:\([^)]*\)|\w+)\s*=>|async\s+(\w+)\s*\([^)]*\)\s*\{)/;
 
@@ -89,7 +97,6 @@ function scanUnhandledAsync(content, filePath) {
     const m = lines[i].match(asyncFnRegex);
     if (!m) continue;
     const fnName = m[2] || m[3] || m[4] || 'anonymous';
-    const indent = m[1].length;
 
     // Find the function body — collect lines until matching closing brace at same indent
     const bodyLines = [];
@@ -109,8 +116,17 @@ function scanUnhandledAsync(content, filePath) {
     // Skip if function body has no await — nothing to wrap
     if (!/\bawait\s+/.test(body)) continue;
 
-    // Skip if body has try/catch ANYWHERE — fixes the "try not first statement" false positive
-    if (/\btry\s*\{/.test(body) && /\bcatch\s*\(/.test(body)) continue;
+    // Skip if body has try/catch ANYWHERE — try not required at position 1.
+    // Calibration fix: ES2019 optional catch binding allows `catch {}` without
+    // parens. Accept both `catch (` and `catch {`.
+    if (/\btry\s*\{/.test(body) && /\bcatch\s*[({]/.test(body)) continue;
+
+    // Calibration fix: skip if function is called with .catch() elsewhere in the file
+    // (the main().catch(...) pattern at script entry points handles errors at call site).
+    if (fnName && fnName !== 'anonymous') {
+      const callCatchRegex = new RegExp(`\\b${fnName.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\s*\\([^)]*\\)\\s*\\.\\s*catch\\s*\\(`);
+      if (callCatchRegex.test(content)) continue;
+    }
 
     findings.push({
       line: i + 1,
@@ -140,9 +156,10 @@ function scanAsAnyCast(content) {
 function scanSilentCatch(content) {
   const findings = [];
   const lines = content.split('\n');
-  // Find catch { ... } blocks
+  // Calibration fix: match both catch (e) {} and catch {} (ES2019 optional binding).
+  // Also skip `.catch(` Promise chain methods (not the catch keyword).
   for (let i = 0; i < lines.length; i++) {
-    const m = lines[i].match(/catch\s*\(([^)]*)\)\s*\{/);
+    const m = lines[i].match(/(?<![.\w])catch\s*(?:\(([^)]*)\)\s*)?\{/);
     if (!m) continue;
     const errVar = (m[1] || '').trim();
 
@@ -160,27 +177,35 @@ function scanSilentCatch(content) {
     }
     const body = bodyLines.slice(1, -1).join('\n').trim();
 
-    // Empty catch is silent
-    if (body === '') {
+    // Calibration: distinguish truly silent catches from documented-intent ones.
+    // catch { /* intentional */ } documents intent.
+    // catch { continue; } and catch { break; } are loop control flow.
+    const bodyRaw = bodyLines.slice(1, -1).join('\n');
+    const hasComment = /\/\/|\/\*/.test(bodyRaw);
+    const hasContinue = /\bcontinue\b/.test(body);
+    const hasBreak = /\bbreak\b/.test(body);
+
+    // Truly empty + no comment = silent
+    if (body === '' && !hasComment) {
       findings.push({
         line: i + 1,
         snippet: lines[i].trim().slice(0, 120),
-        context: 'Empty catch block',
+        context: 'Empty catch block with no comment or control flow',
       });
       continue;
     }
 
-    // Catch that doesn't reference the error variable, log, throw, or return error
+    // Has body but doesn't reference error/log/throw/return AND no documented intent
     const usesError = errVar && new RegExp(`\\b${errVar.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(body);
     const logs = /console\.|logger\.|log\(|sentry|capture/i.test(body);
     const throws = /\bthrow\b/.test(body);
     const returns = /\breturn\b/.test(body);
 
-    if (!usesError && !logs && !throws && !returns) {
+    if (!usesError && !logs && !throws && !returns && !hasComment && !hasContinue && !hasBreak) {
       findings.push({
         line: i + 1,
         snippet: lines[i].trim().slice(0, 120),
-        context: 'catch block does not log, throw, or reference error',
+        context: 'catch block does not log, throw, reference error, or document intent',
       });
     }
   }
@@ -241,16 +266,44 @@ function scanMissingTenantFilter(content) {
 function scanTodoComments(content) {
   const findings = [];
   const lines = content.split('\n');
+  // Calibration fix: only match TODO/FIXME/HACK in actual COMMENT context.
+  // The naive check used to flag the scanner's own regex string literals
+  // ("TODO|FIXME|XXX|HACK" written as a regex was being detected).
   for (let i = 0; i < lines.length; i++) {
-    if (/\b(TODO|FIXME|XXX|HACK)\b/.test(lines[i])) {
+    const line = lines[i];
+    const commentStart = findCommentStart(line);
+    if (commentStart === -1) continue;
+    const commentPart = line.slice(commentStart);
+    if (/\b(TODO|FIXME|XXX|HACK)\b/.test(commentPart)) {
       findings.push({
         line: i + 1,
-        snippet: lines[i].trim().slice(0, 120),
+        snippet: line.trim().slice(0, 120),
         context: 'Tracking comment in committed code',
       });
     }
   }
   return findings;
+}
+
+/**
+ * Find where a // comment starts on a line, ignoring // inside string literals.
+ * Returns -1 if no comment present. Conservative — handles the common case
+ * of TODO inside regex/string false positives.
+ */
+function findCommentStart(line) {
+  let inSingle = false, inDouble = false, inBacktick = false;
+  for (let i = 0; i < line.length - 1; i++) {
+    const ch = line[i];
+    const prev = i > 0 ? line[i - 1] : '';
+    if (prev === '\\') continue;
+    if (ch === "'" && !inDouble && !inBacktick) inSingle = !inSingle;
+    else if (ch === '"' && !inSingle && !inBacktick) inDouble = !inDouble;
+    else if (ch === '`' && !inSingle && !inDouble) inBacktick = !inBacktick;
+    else if (!inSingle && !inDouble && !inBacktick && ch === '/' && line[i + 1] === '/') {
+      return i;
+    }
+  }
+  return -1;
 }
 
 /**
@@ -269,6 +322,8 @@ export function scanPatterns(filePaths) {
 
     for (const pattern of PATTERNS) {
       if (!pattern.filePattern.test(filePath)) continue;
+      // Calibration fix: per-pattern skip list (e.g., silent_catch skips test files)
+      if (pattern.skipPattern && pattern.skipPattern.test(filePath)) continue;
 
       const findings = pattern.scan(content, filePath);
       if (findings.length === 0) continue;
@@ -295,6 +350,18 @@ export function scanPatterns(filePaths) {
   }
 
   return [...groups.values()];
+}
+
+/**
+ * Strip backtick template literal content (preserving line breaks) before
+ * regex scanning. Test files often embed code-as-fixtures inside template
+ * literals — those should not be flagged as real code.
+ */
+function stripTemplateLiterals(content) {
+  return content.replace(/`(?:\\.|[^`\\])*`/gs, (match) => {
+    const newlines = (match.match(/\n/g) || []).length;
+    return '``' + '\n'.repeat(newlines);
+  });
 }
 
 export { PATTERNS };
