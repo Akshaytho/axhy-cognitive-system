@@ -2,18 +2,20 @@
 
 import { createInterface } from 'node:readline';
 import { existsSync, readFileSync } from 'node:fs';
-import { createHash } from 'node:crypto';
 import { checkBeforeEdit } from './check-before-edit.mjs';
 import { checkBeforePlan } from './check-before-plan.mjs';
 import { checkBeforeDone } from './check-before-done.mjs';
+import { checkBeforeBuild } from './check-before-build.mjs';
 import { impactCheck, loadRealImpactCheck, isConnected } from './impact-adapter.mjs';
 import { classifyRisk } from '../layer-1-hook/risk-classifier.mjs';
 import { logApprovalCreated, logApprovalDenied } from './audit-log.mjs';
+import {
+  getRepoRoot, getRepoHash, getTimeouts, getFileReadTimestamp,
+} from '../shared/config.mjs';
 
-const REPO_ROOT = process.env.AXHY_REPO_ROOT || process.cwd();
-const REPO_HASH = createHash('md5').update(REPO_ROOT).digest('hex').slice(0, 8);
-const READ_STATE_FILE = `/tmp/axhy-${REPO_HASH}-read-state.json`;
-const READ_WINDOW_MS = 10 * 60 * 1000;
+// H7+L2 fix (2026-05-23): use centralized identity and config instead of local duplicates.
+const REPO_ROOT = getRepoRoot();
+const REPO_HASH = getRepoHash();
 
 const EDIT_TOOL_DEFINITION = {
   name: 'check_before_edit',
@@ -120,14 +122,14 @@ const PLAN_TOOL_DEFINITION = {
   },
 };
 
+// H7+L2 fix: use centralized getFileReadTimestamp (scans all hash buckets)
+// and getTimeouts().read_window_ms (config-driven, not hardcoded).
 function getFileReadStatus(filePaths) {
-  if (!existsSync(READ_STATE_FILE)) return {};
-  let reads;
-  try { reads = JSON.parse(readFileSync(READ_STATE_FILE, 'utf-8')); } catch { return {}; }
+  const windowMs = getTimeouts().read_window_ms;
   const status = {};
   for (const fp of filePaths) {
-    const lastRead = reads[fp];
-    status[fp] = lastRead && (Date.now() - lastRead) < READ_WINDOW_MS;
+    const ts = getFileReadTimestamp(fp);
+    status[fp] = ts > 0 && (Date.now() - ts) < windowMs;
   }
   return status;
 }
@@ -252,6 +254,73 @@ const DONE_TOOL_DEFINITION = {
   },
 };
 
+const BUILD_TOOL_DEFINITION = {
+  name: 'check_before_build',
+  description: 'Call this BEFORE starting to code any slice. Runs the enterprise production preflight using structured fields that map to E1–E14 from docs/locked/ENTERPRISE_PRODUCTION_STANDARD.md. Forces you to think about WHAT (goal, personas, platforms) then HOW (security, ownership, data loss, etc.). Non-deferrable fields (security_boundary, tenant_and_resource_ownership, data_loss_paths, app_store_crash_risks, secrets_and_credentials) cannot use deferral language like "MVP", "later", "placeholder", "good enough". Blocks coding until the preflight passes.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      slice_name: {
+        type: 'string',
+        description: 'Name of the slice being built (e.g., "worker-d1-s2b-2-capture-pipeline").',
+      },
+      plan_reference: {
+        type: 'string',
+        description: 'Path to the plan document for this slice.',
+      },
+      slice_scope: {
+        type: 'string',
+        enum: ['backend', 'mobile', 'shared', 'full_stack'],
+        description: 'Primary scope: backend (routes/DB), mobile (React Native), shared (packages), full_stack (both).',
+      },
+      planned_files: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Every file you intend to create or modify in this slice.',
+      },
+      structured_fields: {
+        type: 'object',
+        description: 'Structured enterprise preflight fields. Context fields set the frame, concern fields map to E-items (15+ words each), meta fields are process controls. Use { status: "N/A", reason: "..." } for items that do not apply.',
+        properties: {
+          feature_goal: { type: 'string', description: 'What the feature does and why it matters to the user (10+ words).' },
+          affected_personas: { description: 'Which personas are affected (worker, supervisor, admin, system). String or array.' },
+          affected_platforms: { description: 'Which platforms (mobile, web, backend, shared). String or array.' },
+          security_boundary: { description: 'E1: How auth + role + ownership is validated on every route (15+ words). NON-DEFERRABLE.' },
+          tenant_and_resource_ownership: { description: 'E2: How companyId filter + resource-level access is enforced (15+ words). NON-DEFERRABLE.' },
+          rate_limit_or_abuse_boundary: { description: 'E3: Per-IP (public) and per-user (auth) rate limits (15+ words).' },
+          source_of_truth: { description: 'E4: What owns the data shape and lifecycle — state machine, schema, locked doc (15+ words).' },
+          lifecycle_or_state_machine_owner: { description: 'E5: Which state machine owns the entity lifecycle — no direct DB status updates (15+ words).' },
+          data_loss_paths: { description: 'E6: What happens on app kill, network failure, storage failure, permission denial (15+ words). NON-DEFERRABLE.' },
+          mobile_web_failure_modes: { description: 'E7: Platform.OS branching, web stubs, storage failure handling (15+ words).' },
+          app_store_crash_risks: { description: 'E8: Zero crashes in normal operation — every code path must be crash-safe (15+ words). NON-DEFERRABLE.' },
+          scale_assumption: { type: 'string', description: 'E9: Default 10,000+ users — indexed queries, no N+1, pagination (10+ words).' },
+          documentation_truth: { description: 'E10: Plan matches code exactly — no fake metadata, no divergence (15+ words).' },
+          required_tests: { description: 'E11: Auth/role/ownership/happy/error tests per route, transition tests per machine (15+ words).' },
+          error_specificity: { description: 'E12: Specific error codes per failure mode — no generic messages (15+ words).' },
+          secrets_and_credentials: { description: 'E13: No credentials in code or bundles — env vars only, bounded presigned URLs (15+ words). NON-DEFERRABLE.' },
+          non_deferrable_summary: { description: 'E14: Confirmation that security, crash, data loss, secrets, doc truth are all addressed (15+ words).' },
+          founder_approved_deferrals: { type: 'string', description: 'Any items explicitly deferred with founder approval. Empty string if none.' },
+          required_screenshots: { type: 'string', description: 'What screens/flows need visual verification at done time.' },
+          known_gaps: { type: 'string', description: 'What is NOT covered by this slice — explicit honesty about boundaries.' },
+        },
+      },
+    },
+    required: ['slice_name', 'plan_reference', 'slice_scope', 'planned_files', 'structured_fields'],
+  },
+};
+
+export async function handleBuildToolCall(args) {
+  return checkBeforeBuild({
+    sliceName: args.slice_name,
+    planReference: args.plan_reference,
+    sliceScope: args.slice_scope || 'full_stack',
+    plannedFiles: args.planned_files || [],
+    structuredFields: args.structured_fields || {},
+    // Backward compat: pass old E1-E14 checklist if provided
+    enterpriseChecklist: args.enterprise_checklist || null,
+  });
+}
+
 export async function handleDoneToolCall(args) {
   return checkBeforeDone({
     intent: args.intent,
@@ -267,7 +336,7 @@ export async function handleDoneToolCall(args) {
   });
 }
 
-export { EDIT_TOOL_DEFINITION, PLAN_TOOL_DEFINITION, DONE_TOOL_DEFINITION };
+export { EDIT_TOOL_DEFINITION, PLAN_TOOL_DEFINITION, DONE_TOOL_DEFINITION, BUILD_TOOL_DEFINITION };
 
 function send(msg) {
   const json = JSON.stringify(msg);
@@ -284,7 +353,7 @@ function handleMessage(msg) {
       result: {
         protocolVersion: '2024-11-05',
         capabilities: { tools: {} },
-        serverInfo: { name: 'axhy-guardrail', version: '0.3.0' },
+        serverInfo: { name: 'axhy-guardrail', version: '0.4.0' },
       },
     });
   }
@@ -295,7 +364,7 @@ function handleMessage(msg) {
     return send({
       jsonrpc: '2.0',
       id,
-      result: { tools: [EDIT_TOOL_DEFINITION, PLAN_TOOL_DEFINITION, DONE_TOOL_DEFINITION] },
+      result: { tools: [EDIT_TOOL_DEFINITION, PLAN_TOOL_DEFINITION, DONE_TOOL_DEFINITION, BUILD_TOOL_DEFINITION] },
     });
   }
 
@@ -310,6 +379,8 @@ function handleMessage(msg) {
       handler = handlePlanToolCall(args);
     } else if (toolName === 'check_before_done') {
       handler = handleDoneToolCall(args);
+    } else if (toolName === 'check_before_build') {
+      handler = handleBuildToolCall(args);
     } else {
       return send({
         jsonrpc: '2.0',

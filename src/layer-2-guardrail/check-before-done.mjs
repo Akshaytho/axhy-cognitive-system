@@ -19,6 +19,7 @@ import { auditSliceFiles, gradeFindings } from './quality-gate.mjs';
 import {
   writeDoneGuardrailState,
   createDoneApprovalState,
+  readBuildGuardrailState,
 } from './state-tracker.mjs';
 
 const AXHY_V3_ROOT = process.env.AXHY_V3_ROOT || (process.env.HOME + '/eclean_workspace/axhy-v3');
@@ -142,6 +143,22 @@ export async function checkBeforeDone({
     preflightFailures.push(
       'Handoff files not updated. Before declaring done, update NEXT_SESSION.md and STATUS.md ' +
       'so the next session knows the current state without hunting for done memos.'
+    );
+  }
+
+  // Enterprise preflight check — verify check_before_build was run for this slice
+  const buildState = readBuildGuardrailState();
+  if (!buildState) {
+    preflightFailures.push(
+      'No enterprise production preflight found. Before declaring done, you must have ' +
+      'run check_before_build at the start of this slice to declare how each E1–E14 ' +
+      'enterprise baseline item would be satisfied. Run check_before_build now, then ' +
+      're-call check_before_done.'
+    );
+  } else if (buildState.slice_name !== sliceName) {
+    preflightFailures.push(
+      `Enterprise preflight exists but for a different slice ("${buildState.slice_name}" vs "${sliceName}"). ` +
+      'Run check_before_build for the current slice, then re-call check_before_done.'
     );
   }
 

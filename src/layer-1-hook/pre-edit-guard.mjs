@@ -10,89 +10,67 @@
  *  4-9. Code file? → check edit-guardrail state (existing flow)
  */
 
-import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
-import { createHash } from 'node:crypto';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { classifyRisk, isGuardrailOptional, isPlanFile, isDoneMemo } from './risk-classifier.mjs';
 import { logApprovalConsumed, logApprovalDenied, logApprovalExpired } from '../layer-2-guardrail/audit-log.mjs';
-import { getWorkspaceRoots, getTimeouts } from '../shared/config.mjs';
+import {
+  getRepoRoot, getTimeouts, getStateFilePath,
+  allHashes, signState, verifyState,
+  wasFileReadRecently, readStateFromAny,
+} from '../shared/config.mjs';
 
-const REPO_ROOT = process.env.CLAUDE_PROJECT_DIR || process.env.AXHY_REPO_ROOT || process.cwd();
-const REPO_HASH = createHash('md5').update(REPO_ROOT).digest('hex').slice(0, 8);
-const STATE_FILE = `/tmp/axhy-${REPO_HASH}-guardrail-state.json`;
-const PLAN_STATE_FILE = `/tmp/axhy-${REPO_HASH}-plan-guardrail-state.json`;
-const DONE_STATE_FILE = `/tmp/axhy-${REPO_HASH}-done-guardrail-state.json`;
-const READ_STATE_FILE = `/tmp/axhy-${REPO_HASH}-read-state.json`;
+const REPO_ROOT = getRepoRoot();
+const STATE_FILE = getStateFilePath('guardrail-state.json');
+const PLAN_STATE_FILE = getStateFilePath('plan-guardrail-state.json');
+const DONE_STATE_FILE = getStateFilePath('done-guardrail-state.json');
 
 const _timeouts = getTimeouts();
 const APPROVAL_WINDOW_MS = _timeouts.approval_window_ms;
 const DONE_APPROVAL_WINDOW_MS = _timeouts.done_approval_window_ms;
-const READ_WINDOW_MS = _timeouts.read_window_ms;
 
-const WORKSPACE_ROOTS = getWorkspaceRoots();
-
-function allHashes() {
-  const set = new Set([REPO_HASH]);
-  for (const r of WORKSPACE_ROOTS) set.add(createHash('md5').update(r).digest('hex').slice(0, 8));
-  return [...set];
-}
-
-function readJsonState(file) {
-  if (!existsSync(file)) return null;
-  try { return JSON.parse(readFileSync(file, 'utf-8')); } catch { return null; }
-}
-
-function readFromAny(file) {
-  // Read-side mirror of writeJsonState fanout (introduced 67089ba): state files are fanned
-  // out to /tmp/axhy-{hash}-{suffix} for every workspace hash. Scan all candidates and return
-  // the most-recent-timestamp valid state, so a state written from one cwd is findable from another.
-  const suffix = file.replace(/.*axhy-[a-f0-9]+-/, '');
+/**
+ * Read state from any hash bucket with HMAC verification (C1 fix).
+ * Rejects forged or tampered state files. Falls back to unsigned
+ * state only if no signed state is available (migration grace).
+ */
+function readFromAnyVerified(suffix) {
   let best = null;
   let bestTs = -1;
+  let bestUnsigned = null;
+  let bestUnsignedTs = -1;
+
   for (const h of allHashes()) {
     const candidate = `/tmp/axhy-${h}-${suffix}`;
     if (!existsSync(candidate)) continue;
     try {
       const parsed = JSON.parse(readFileSync(candidate, 'utf-8'));
       const ts = parsed && typeof parsed.timestamp === 'number' ? parsed.timestamp : 0;
-      if (ts > bestTs) { best = parsed; bestTs = ts; }
+      if (verifyState(parsed)) {
+        // Valid signed state
+        if (ts > bestTs) { best = parsed; bestTs = ts; }
+      } else if (!parsed._sig) {
+        // Unsigned (pre-migration) — accept with lower priority
+        if (ts > bestUnsignedTs) { bestUnsigned = parsed; bestUnsignedTs = ts; }
+      }
+      // If _sig exists but verification fails → forged, skip silently
     } catch {}
   }
-  return best;
+  // Prefer signed state; fall back to unsigned during migration
+  return best || bestUnsigned;
 }
 
+/**
+ * Write state back to all buckets (e.g., after decrementing edits_remaining).
+ * Re-signs the state to maintain HMAC integrity.
+ */
 function writeJsonState(file, state) {
   const suffix = file.replace(/.*axhy-[a-f0-9]+-/, '');
-  const json = JSON.stringify(state, null, 2);
+  const signed = signState(state);
+  const json = JSON.stringify(signed, null, 2);
   for (const h of allHashes()) {
     try { writeFileSync(`/tmp/axhy-${h}-${suffix}`, json); } catch {}
   }
-}
-
-function wasFileReadRecently(filePath) {
-  // Glob every /tmp/axhy-*-read-state.json bucket: any cwd-shift (pnpm
-  // filter, expo CLI, playwright subagent) can land the Read in a hash
-  // bucket whose workspace-root isn't in WORKSPACE_ROOTS. Enumerating
-  // existing files is more robust than maintaining a hardcoded list.
-  // Every timestamp considered came from a real Read tool invocation.
-  let mostRecent = 0;
-  let candidates = [];
-  try {
-    const all = readdirSync('/tmp');
-    for (const name of all) {
-      if (name.startsWith('axhy-') && name.endsWith('-read-state.json')) {
-        candidates.push(`/tmp/${name}`);
-      }
-    }
-  } catch {}
-  for (const candidate of candidates) {
-    const reads = readJsonState(candidate);
-    if (!reads) continue;
-    const ts = reads[filePath];
-    if (typeof ts === 'number' && ts > mostRecent) mostRecent = ts;
-  }
-  if (!mostRecent) return false;
-  return (Date.now() - mostRecent) < READ_WINDOW_MS;
 }
 
 function block(reason) {
@@ -105,7 +83,8 @@ function allow() {
 }
 
 function checkGuardedFile(filePath, stateFile, windowMs, toolName) {
-  const state = readFromAny(stateFile);
+  const suffix = stateFile.replace(/.*axhy-[a-f0-9]+-/, '');
+  const state = readFromAnyVerified(suffix);
   if (!state) {
     block(
       `⛔ BLOCKED: No ${toolName} approval found.\n` +
@@ -189,7 +168,7 @@ async function main() {
 
   // 4-9. Code files — existing flow
   // Check order matches checkGuardedFile: exists → expiry → scope → read → limit → question
-  const state = readFromAny(STATE_FILE);
+  const state = readFromAnyVerified('guardrail-state.json');
   if (!state) {
     block(
       `⛔ BLOCKED: No guardrail approval found.\n` +

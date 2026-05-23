@@ -59,6 +59,20 @@ function runGuard(filePath) {
 
 const VALID_INTENT = 'I want to update the chat route handler to add rate limiting for supervisor messages because the current implementation has no throttling which risks overwhelming the backend under load and could cause degraded performance for all users';
 
+// H1 fix: reasoning evidence required for high/medium risk files
+const HIGH_RISK_EVIDENCE = {
+  invariants_preserved: 'The existing guardrail mandate at CLAUDE.md line 36 stays intact because the change only adds content below existing sections',
+  risk_if_wrong: 'If the change introduces product terms into CLAUDE.md, the memory firewall at storage-hook.mjs will block future edits',
+  what_would_make_me_stop: 'If grep reveals product terms like worker or facility in the new content, or if layer-2-guardrail.test.mjs assertions break',
+  files_read: ['CLAUDE.md', 'src/memory-firewall/storage-hook.mjs'],
+};
+
+const MEDIUM_RISK_EVIDENCE = {
+  risk_if_wrong: 'If the route handler at routes/chat.ts breaks, all chat API endpoints will return 500 errors affecting every connected client',
+  why_this_path_is_safe: 'The change adds a middleware wrapper around the existing handler at chat.ts line 15 without modifying core logic',
+  files_read: ['apps/backend/src/routes/chat.ts'],
+};
+
 describe('Integration: Layer 2 approval → Layer 1 enforcement', async () => {
   const { checkBeforeEdit } = await import(
     join(__dirname, '..', 'src', 'layer-2-guardrail', 'check-before-edit.mjs')
@@ -101,6 +115,7 @@ describe('Integration: Layer 2 approval → Layer 1 enforcement', async () => {
       filePaths: ['CLAUDE.md'],
       fileReadStatus: { 'CLAUDE.md': true },
       testStatus: { 'CLAUDE.md': true },
+      reasoningEvidence: HIGH_RISK_EVIDENCE,
     });
     assert.equal(approval.allowed, false);
     assert.equal(approval.requires_answer, true);
@@ -250,6 +265,7 @@ describe('Integration: Full risk classification → approval → enforcement cha
       filePaths: ['CLAUDE.md'],
       fileReadStatus: { 'CLAUDE.md': true },
       testStatus: { 'CLAUDE.md': true },
+      reasoningEvidence: HIGH_RISK_EVIDENCE,
     });
     checkBeforeEdit({
       intent: VALID_INTENT,
@@ -276,6 +292,7 @@ describe('Integration: Full risk classification → approval → enforcement cha
       filePaths: ['apps/backend/src/routes/chat.ts'],
       fileReadStatus: { 'apps/backend/src/routes/chat.ts': true },
       testStatus: { 'apps/backend/src/routes/chat.ts': true },
+      reasoningEvidence: MEDIUM_RISK_EVIDENCE,
     });
 
     markFileRead('apps/backend/src/routes/chat.ts');

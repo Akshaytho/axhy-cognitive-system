@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 
 import { execFileSync, execSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
+import { randomBytes } from 'node:crypto';
 import { checkPersonaDocChanges } from '../audit/persona-doc-guard.mjs';
 import { findLearningWarnings } from '../audit/learning-validator.mjs';
 
@@ -37,15 +38,55 @@ async function main() {
   }
 
   // 3. Also guard docs/locked/ (backward compat until fully migrated to personas)
+  // C6 fix (2026-05-23): replaced AXHY_FOUNDER_APPROVED env var with challenge-response.
+  // The env var was bypassable by any process. Challenge-response requires the founder
+  // to manually type a random token in the terminal — the AI cannot do this because
+  // bash-guard blocks writes to /tmp/axhy-* and the challenge expires in 2 minutes.
   try {
     const lockedMod = execFileSync('git', ['diff', '--cached', '--diff-filter=MA', '--name-only', '--', 'docs/locked/*.md'], {
       cwd: REPO_ROOT, encoding: 'utf-8',
     }).trim();
-    if (lockedMod && process.env.AXHY_FOUNDER_APPROVED !== '1') {
-      log('locked', 'BLOCKED: Changes to docs/locked/ require founder approval.');
-      log('locked', `Files: ${lockedMod}`);
-      log('locked', 'AXHY_FOUNDER_APPROVED=1 git commit ...');
-      fail('');
+    if (lockedMod) {
+      const CHALLENGE_FILE = '/tmp/axhy-founder-challenge.json';
+      const RESPONSE_FILE = '/tmp/axhy-founder-response';
+      const CHALLENGE_EXPIRY_MS = 2 * 60 * 1000; // 2 minutes
+
+      // Check if a valid response already exists (from a previous attempt in this window)
+      let approved = false;
+      if (existsSync(CHALLENGE_FILE) && existsSync(RESPONSE_FILE)) {
+        try {
+          const challenge = JSON.parse(readFileSync(CHALLENGE_FILE, 'utf-8'));
+          const response = readFileSync(RESPONSE_FILE, 'utf-8').trim();
+          const elapsed = Date.now() - (challenge.timestamp || 0);
+          if (elapsed < CHALLENGE_EXPIRY_MS && response === challenge.token) {
+            approved = true;
+            // Clean up after successful verification
+            try { unlinkSync(CHALLENGE_FILE); } catch {}
+            try { unlinkSync(RESPONSE_FILE); } catch {}
+          }
+        } catch {}
+      }
+
+      if (!approved) {
+        // Generate new challenge
+        const token = randomBytes(3).toString('hex').toUpperCase(); // 6-char hex
+        writeFileSync(CHALLENGE_FILE, JSON.stringify({
+          token,
+          timestamp: Date.now(),
+          files: lockedMod.split('\n'),
+        }));
+
+        log('locked', 'BLOCKED: Changes to docs/locked/ require founder approval.');
+        log('locked', `Files: ${lockedMod}`);
+        log('locked', '');
+        log('locked', '  To approve, run this in your terminal within 2 minutes:');
+        log('locked', `    echo ${token} > /tmp/axhy-founder-response`);
+        log('locked', '');
+        log('locked', '  Then re-run: git commit ...');
+        fail('');
+      } else {
+        log('locked', 'Founder challenge-response verified. Locked doc changes approved.');
+      }
     }
   } catch {}
 

@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 
-import { classifyKnowledge, validateCorePrinciplePromotion } from './classifier.mjs';
+import {
+  classifyKnowledge, validateCorePrinciplePromotion,
+  validateEnterpriseStandardWeakening,
+} from './classifier.mjs';
 import { readFileSync } from 'node:fs';
 
 const MEMORY_PATHS = [
@@ -67,15 +70,38 @@ async function main() {
 
       if (classification.category === 'external_research') {
         process.stderr.write(
-          `⚠️  External research detected. Validation path: candidate → reviewed → tested → approved.\n` +
-          `This content should go to docs/learnings/candidate/, not directly to locked docs or core.\n`
+          `⛔ MEMORY FIREWALL: Blocked external research write.\n` +
+          `External research must go through validation: candidate → reviewed → tested → approved.\n` +
+          `Write to docs/learnings/candidate/ instead, not directly to memory files.\n` +
+          `File: ${filePath}\n`
         );
+        process.exit(2);
+        return;
       }
 
       if (classification.category === 'core_principle') {
         process.stderr.write(
-          `⚠️  Core principle detected — requires explicit founder approval before storing.\n`
+          `⛔ MEMORY FIREWALL: Blocked core principle write.\n` +
+          `Core principles require explicit founder approval before storing.\n` +
+          `Ask the founder first, then write with their confirmation.\n` +
+          `File: ${filePath}\n`
         );
+        process.exit(2);
+        return;
+      }
+
+      // Block candidate learnings that weaken enterprise production standards
+      if (classification.category === 'candidate_learning' || classification.category === 'product_rule') {
+        const weakening = validateEnterpriseStandardWeakening(content);
+        if (!weakening.allowed) {
+          process.stderr.write(
+            `⛔ MEMORY FIREWALL: Blocked enterprise standard weakening.\n` +
+            `${weakening.reason}\n` +
+            `File: ${filePath}\n`
+          );
+          process.exit(2);
+          return;
+        }
       }
     }
   }

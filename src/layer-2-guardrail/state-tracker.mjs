@@ -1,25 +1,37 @@
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { createHash } from 'node:crypto';
-import { getWorkspaceRoots } from '../shared/config.mjs';
+import {
+  getRepoHash, allHashes, getStateFilePath,
+  signState, readStateFromAny,
+} from '../shared/config.mjs';
 
-const REPO_ROOT = process.env.CLAUDE_PROJECT_DIR || process.env.AXHY_REPO_ROOT || process.cwd();
-const REPO_HASH = createHash('md5').update(REPO_ROOT).digest('hex').slice(0, 8);
-const STATE_FILE = `/tmp/axhy-${REPO_HASH}-guardrail-state.json`;
-const READ_STATE_FILE = `/tmp/axhy-${REPO_HASH}-read-state.json`;
-const PLAN_STATE_FILE = `/tmp/axhy-${REPO_HASH}-plan-guardrail-state.json`;
-const DONE_STATE_FILE = `/tmp/axhy-${REPO_HASH}-done-guardrail-state.json`;
+const REPO_HASH = getRepoHash();
+const STATE_FILE = getStateFilePath('guardrail-state.json');
+const READ_STATE_FILE = getStateFilePath('read-state.json');
+const PLAN_STATE_FILE = getStateFilePath('plan-guardrail-state.json');
+const DONE_STATE_FILE = getStateFilePath('done-guardrail-state.json');
+const BUILD_STATE_FILE = getStateFilePath('build-guardrail-state.json');
 
-const WORKSPACE_ROOTS = getWorkspaceRoots();
-
-function allHashes() {
-  const set = new Set([REPO_HASH]);
-  for (const r of WORKSPACE_ROOTS) set.add(createHash('md5').update(r).digest('hex').slice(0, 8));
-  return [...set];
-}
-
+/**
+ * Write state to all hash buckets with HMAC signature.
+ * For object content: signs then serializes.
+ * For read-state (key-value map without timestamp): writes unsigned
+ * (read-state is not an approval — it tracks file reads).
+ */
 function writeToAll(suffix, content) {
-  const json = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
+  let json;
+  if (typeof content === 'string') {
+    json = content;
+  } else if (suffix === 'read-state.json') {
+    // Read state is a simple {filePath: timestamp} map, not an approval.
+    // No HMAC needed — it's not a trust boundary (the read-before-edit
+    // check is defense-in-depth, not the primary gate).
+    json = JSON.stringify(content, null, 2);
+  } else {
+    // Sign all approval state objects before writing
+    const signed = signState(content);
+    json = JSON.stringify(signed, null, 2);
+  }
   for (const h of allHashes()) {
     try { writeFileSync(`/tmp/axhy-${h}-${suffix}`, json); } catch {}
   }
@@ -123,4 +135,32 @@ export function createDoneApprovalState({
   };
 }
 
-export { STATE_FILE, READ_STATE_FILE, PLAN_STATE_FILE, DONE_STATE_FILE };
+// Build guardrail state (enterprise preflight)
+// Uses readStateFromAny for cross-CWD resilience (H3 fix):
+// if check_before_build ran from a different cwd, the state is still findable.
+export function readBuildGuardrailState() {
+  return readStateFromAny('build-guardrail-state.json');
+}
+
+export function writeBuildGuardrailState(state) {
+  writeToAll('build-guardrail-state.json', state);
+}
+
+export function createBuildApprovalState({
+  sliceName, planReference, sliceScope, plannedFiles,
+  checklist = { passed: [], na: [] },
+}) {
+  return {
+    timestamp: Date.now(), type: 'build',
+    slice_name: sliceName,
+    plan_reference: planReference,
+    slice_scope: sliceScope,
+    planned_files: plannedFiles,
+    checklist,
+    // Build approval does not gate individual file edits (that's check_before_edit).
+    // It records that enterprise preflight was completed for this slice.
+    // check_before_done references this state to verify preflight was run.
+  };
+}
+
+export { STATE_FILE, READ_STATE_FILE, PLAN_STATE_FILE, DONE_STATE_FILE, BUILD_STATE_FILE };

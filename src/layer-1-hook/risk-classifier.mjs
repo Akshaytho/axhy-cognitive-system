@@ -48,6 +48,7 @@ const GUARDRAIL_OPTIONAL_PATTERNS = [
   /docs\/findings\/.*\.md$/,
   /README\.md$/,
   /docs\/audits\/.*\.md$/,
+  /docs\/retros\/.*\.md$/,
 ];
 
 export function classifyRisk(filePath) {

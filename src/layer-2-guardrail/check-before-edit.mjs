@@ -10,6 +10,7 @@ import {
   readGuardrailState,
   markQuestionAnswered,
   createApprovalState,
+  readBuildGuardrailState,
 } from './state-tracker.mjs';
 
 export function checkBeforeEdit({
@@ -47,10 +48,18 @@ export function checkBeforeEdit({
   const risk = classifyRisk(primaryFile);
 
   // Validate structured reasoning evidence for medium/high risk files.
-  // If reasoning_evidence is provided, use the new validator.
-  // If not provided (backward compat), allow with a warning for medium risk,
-  // but still require for high risk in the future (currently lenient).
-  if (reasoningEvidence && (risk.level === 'high' || risk.level === 'medium')) {
+  // H1 fix (2026-05-23): reasoning_evidence is REQUIRED for high/medium risk.
+  // Previously optional (backward compat) — but this let high-risk edits
+  // proceed without articulating invariants_preserved, risk_if_wrong, etc.
+  if (risk.level === 'high' || risk.level === 'medium') {
+    if (!reasoningEvidence) {
+      return {
+        allowed: false,
+        reason: `Evidence lacks specificity in: ${getRequiredFields(risk.level).join(', ')}. Include at least one concrete reference (file path, function name, or line number).`,
+        suggestion: 'Provide substantive structured reasoning evidence.',
+        required_evidence: getRequiredFields(risk.level),
+      };
+    }
     const evidenceResult = validateEvidence(reasoningEvidence, risk.level);
     if (!evidenceResult.valid) {
       return {
@@ -91,6 +100,39 @@ export function checkBeforeEdit({
       maturityMode: maturity.mode,
       suggestion: 'These locked constraints prevent this change. Surface to founder before proceeding.',
     };
+  }
+
+  // Build preflight integration: for new_feature changes on medium/high risk,
+  // check that check_before_build was run recently (within 30 minutes).
+  const BUILD_PREFLIGHT_MAX_AGE_MS = 30 * 60 * 1000;
+  if (changeType === 'new_feature' && (risk.level === 'high' || risk.level === 'medium')) {
+    try {
+      const buildState = readBuildGuardrailState();
+      if (!buildState) {
+        warnings.push(
+          'No enterprise build preflight found. For new features on medium/high-risk files, ' +
+          'run check_before_build first to declare how enterprise baseline items will be satisfied.'
+        );
+      } else if (Date.now() - buildState.timestamp > BUILD_PREFLIGHT_MAX_AGE_MS) {
+        warnings.push(
+          `Enterprise build preflight is stale (ran ${Math.round((Date.now() - buildState.timestamp) / 60000)} minutes ago). ` +
+          'Consider re-running check_before_build if starting a new slice.'
+        );
+      }
+    } catch {
+      // Non-blocking: if build state read fails, continue without warning
+    }
+  }
+
+  // Grep-before-fix: for bug fixes, remind to search for the same pattern
+  // across the codebase before fixing it in a single file. Repeated bugs
+  // often live in multiple files with the same architecture.
+  if (changeType === 'bug_fix') {
+    warnings.push(
+      'Bug fix: before applying this fix, grep/search all files in the same architecture ' +
+      'for the same pattern. Repeated bugs often exist in multiple files. Fix all instances ' +
+      'together, not one at a time.'
+    );
   }
 
   const nextQuestions = generateNextQuestion({

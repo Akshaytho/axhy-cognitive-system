@@ -3,17 +3,27 @@
  *
  * Reads .axhy/config.json once per process. Falls back to hardcoded defaults
  * if the config file is missing or malformed — system always boots.
+ *
+ * Also provides centralized REPO_ROOT, REPO_HASH, allHashes(), state file
+ * path helpers, and HMAC signing for state file integrity (C1/M1/M3 fixes).
  */
 
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash, createHmac } from 'node:crypto';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // Walk up from src/shared/ to repo root (axhy-cognitive-system/)
-const REPO_ROOT = resolve(__dirname, '..', '..');
-const CONFIG_PATH = resolve(REPO_ROOT, '.axhy', 'config.json');
+const COGNITIVE_SYSTEM_ROOT = resolve(__dirname, '..', '..');
+const CONFIG_PATH = resolve(COGNITIVE_SYSTEM_ROOT, '.axhy', 'config.json');
+
+// ── Repo root: consistent derivation used by ALL components ──
+// Priority: CLAUDE_PROJECT_DIR > AXHY_REPO_ROOT > cwd()
+// Previously inconsistent: server.mjs missed CLAUDE_PROJECT_DIR (M3 fix).
+const REPO_ROOT = process.env.CLAUDE_PROJECT_DIR || process.env.AXHY_REPO_ROOT || process.cwd();
+const REPO_HASH = createHash('md5').update(REPO_ROOT).digest('hex').slice(0, 8);
 
 // Hardcoded defaults — used if config file is missing
 const DEFAULTS = {
@@ -86,4 +96,141 @@ export function resetConfigCache() {
 /** Get the config file path — used in tests. */
 export function getConfigPath() {
   return CONFIG_PATH;
+}
+
+// ── Centralized repo identity (M1/M3 fix) ──
+// Previously duplicated across state-tracker.mjs, pre-edit-guard.mjs,
+// server.mjs, and all test files — each with slightly different logic.
+
+export function getRepoRoot() {
+  return REPO_ROOT;
+}
+
+export function getRepoHash() {
+  return REPO_HASH;
+}
+
+/**
+ * All hash buckets: repo hash + every workspace root hash.
+ * State files are fanned out to all buckets on write so they're
+ * findable regardless of which cwd the reader runs from.
+ */
+export function allHashes() {
+  const set = new Set([REPO_HASH]);
+  for (const r of getWorkspaceRoots()) {
+    set.add(createHash('md5').update(r).digest('hex').slice(0, 8));
+  }
+  return [...set];
+}
+
+/**
+ * Get the path for a state file by suffix.
+ * E.g., getStateFilePath('guardrail-state.json') → '/tmp/axhy-{hash}-guardrail-state.json'
+ */
+export function getStateFilePath(suffix) {
+  return `/tmp/axhy-${REPO_HASH}-${suffix}`;
+}
+
+// ── HMAC state file signing (C1 fix) ──
+// Prevents forged state files. The secret is deterministic from the repo
+// (so all processes — MCP server, hooks — derive the same key) but not
+// guessable from outside the filesystem.
+//
+// Threat model: AI forging state files via bash commands is blocked by
+// bash-guard. HMAC catches any forgery that slips past bash-guard (e.g.,
+// via a missed command pattern). It does NOT protect against an attacker
+// with filesystem access — that's a different threat.
+
+let _hmacSecret = null;
+
+function getHmacSecret() {
+  if (_hmacSecret) return _hmacSecret;
+  // Derive from package.json content + cognitive system root path.
+  // Deterministic across all processes reading from the same repo.
+  // Changes if package.json changes (invalidates old state — intentional).
+  const pkgPath = resolve(COGNITIVE_SYSTEM_ROOT, 'package.json');
+  let pkgContent = '';
+  try { pkgContent = readFileSync(pkgPath, 'utf-8'); } catch {}
+  _hmacSecret = createHash('sha256')
+    .update(pkgContent)
+    .update(COGNITIVE_SYSTEM_ROOT)
+    .update('axhy-state-integrity-v1')
+    .digest('hex');
+  return _hmacSecret;
+}
+
+/**
+ * Sign a state object. Returns a new object with `_sig` field.
+ * The signature covers all fields EXCEPT `_sig` itself.
+ */
+export function signState(state) {
+  const { _sig, ...payload } = state; // strip any existing sig
+  const json = JSON.stringify(payload, Object.keys(payload).sort());
+  const sig = createHmac('sha256', getHmacSecret()).update(json).digest('hex');
+  return { ...payload, _sig: sig };
+}
+
+/**
+ * Verify a signed state object. Returns true if valid.
+ * Returns false if missing `_sig` or signature doesn't match.
+ */
+export function verifyState(state) {
+  if (!state || !state._sig) return false;
+  const { _sig, ...payload } = state;
+  const json = JSON.stringify(payload, Object.keys(payload).sort());
+  const expected = createHmac('sha256', getHmacSecret()).update(json).digest('hex');
+  return _sig === expected;
+}
+
+/**
+ * Read file status across ALL hash buckets (C3 fix).
+ * Replaces the /tmp glob with deterministic allHashes() iteration.
+ * Returns the most recent timestamp for the given filePath, or 0.
+ */
+export function getFileReadTimestamp(filePath) {
+  let mostRecent = 0;
+  for (const h of allHashes()) {
+    const candidate = `/tmp/axhy-${h}-read-state.json`;
+    if (!existsSync(candidate)) continue;
+    try {
+      const reads = JSON.parse(readFileSync(candidate, 'utf-8'));
+      const ts = reads[filePath];
+      if (typeof ts === 'number' && ts > mostRecent) mostRecent = ts;
+    } catch {}
+  }
+  return mostRecent;
+}
+
+/**
+ * Check if a file was read within the configured read window.
+ * Used by both L1 (pre-edit-guard) and L2 (server.mjs) for consistency (H7 fix).
+ */
+export function wasFileReadRecently(filePath) {
+  const ts = getFileReadTimestamp(filePath);
+  if (!ts) return false;
+  return (Date.now() - ts) < getTimeouts().read_window_ms;
+}
+
+/**
+ * Read a state file from any hash bucket, returning the most recent.
+ * Used for cross-CWD resilience (H3 fix for build state, etc.)
+ */
+export function readStateFromAny(suffix) {
+  let best = null;
+  let bestTs = -1;
+  for (const h of allHashes()) {
+    const candidate = `/tmp/axhy-${h}-${suffix}`;
+    if (!existsSync(candidate)) continue;
+    try {
+      const parsed = JSON.parse(readFileSync(candidate, 'utf-8'));
+      const ts = parsed && typeof parsed.timestamp === 'number' ? parsed.timestamp : 0;
+      if (ts > bestTs) { best = parsed; bestTs = ts; }
+    } catch {}
+  }
+  return best;
+}
+
+/** Reset HMAC secret cache — for tests. */
+export function resetHmacSecret() {
+  _hmacSecret = null;
 }
