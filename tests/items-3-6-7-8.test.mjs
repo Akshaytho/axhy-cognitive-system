@@ -68,7 +68,7 @@ describe('Item 3: Build-Edit Integration', async () => {
   beforeEach(() => cleanState());
   after(() => cleanState());
 
-  it('should warn when new_feature on medium-risk file has no build preflight', () => {
+  it('should BLOCK when new_feature on medium-risk file has no build preflight', () => {
     const result = checkBeforeEdit({
       intent: VALID_INTENT,
       filePaths: ['apps/backend/src/routes/chat.ts'],
@@ -77,12 +77,13 @@ describe('Item 3: Build-Edit Integration', async () => {
       testStatus: { 'apps/backend/src/routes/chat.ts': true },
       reasoningEvidence: MEDIUM_RISK_EVIDENCE,
     });
-    const buildWarning = result.warnings.find(w => w.includes('build preflight'));
-    assert.ok(buildWarning, 'Should include build preflight warning');
-    assert.match(buildWarning, /check_before_build/);
+    // Gap 4 fix: missing build preflight is a hard block, not a warning
+    assert.equal(result.allowed, false, 'Should block when build preflight missing');
+    assert.match(result.reason, /check_before_build/);
+    assert.match(result.reason, /enterprise/i);
   });
 
-  it('should warn when new_feature on high-risk file has no build preflight', () => {
+  it('should BLOCK when new_feature on high-risk file has no build preflight', () => {
     const result = checkBeforeEdit({
       intent: VALID_INTENT,
       filePaths: ['prisma/schema.prisma'],
@@ -91,8 +92,9 @@ describe('Item 3: Build-Edit Integration', async () => {
       testStatus: { 'prisma/schema.prisma': true },
       reasoningEvidence: HIGH_RISK_EVIDENCE,
     });
-    const buildWarning = result.warnings.find(w => w.includes('build preflight'));
-    assert.ok(buildWarning, 'High-risk new_feature should get build preflight warning');
+    // Gap 4 fix: missing build preflight is a hard block, not a warning
+    assert.equal(result.allowed, false, 'High-risk new_feature should block without build preflight');
+    assert.match(result.reason, /check_before_build/);
   });
 
   it('should NOT warn for new_feature on LOW-risk file (no build preflight needed)', () => {

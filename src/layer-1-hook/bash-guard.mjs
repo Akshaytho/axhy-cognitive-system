@@ -30,8 +30,11 @@ const STATE_FILE_PATTERNS = [
   { pattern: /open\s*\(.*\/tmp\/axhy-.*,\s*['"`]w/, reason: 'Python open(w) to state file' },
   { pattern: /edits_remaining['"]?\s*[:=]\s*([2-9]\d|\d{3,})/, reason: 'Edit limit inflation' },
   { pattern: /question_answered['"]\s*:\s*true/, reason: 'Question bypass flag' },
-  { pattern: /AXHY_AUDIT_EMERGENCY\s*=\s*1/, reason: 'Emergency flag bypass' },
-  { pattern: /AXHY_FOUNDER_APPROVED\s*=\s*1/, reason: 'Founder-approved flag bypass' },
+  // Scoped to shell execution context — not triggered by string literals in
+  // commit messages or retro docs that honestly name temptations (CORE_MIND §Right/Wrong).
+  // Matches: export VAR=1, env VAR=1, VAR=1 at command start, or after ; && ||
+  { pattern: /(^|;\s*|&&\s*|\|\|\s*|\bexport\s+|\benv\s+)AXHY_AUDIT_EMERGENCY\s*=\s*1/, reason: 'Emergency flag bypass' },
+  { pattern: /(^|;\s*|&&\s*|\|\|\s*|\bexport\s+|\benv\s+)AXHY_FOUNDER_APPROVED\s*=\s*1/, reason: 'Founder-approved flag bypass' },
 ];
 
 // --- Category 2: Scripting language / shell redirect bypass patterns ---

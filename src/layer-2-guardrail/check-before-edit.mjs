@@ -109,10 +109,19 @@ export function checkBeforeEdit({
     try {
       const buildState = readBuildGuardrailState();
       if (!buildState) {
-        warnings.push(
-          'No enterprise build preflight found. For new features on medium/high-risk files, ' +
-          'run check_before_build first to declare how enterprise baseline items will be satisfied.'
-        );
+        // Hard block: E14 non-deferrable items require explicit preflight declaration.
+        // A session that skips check_before_build entirely cannot prove non-deferrable
+        // items (security, crash prevention, data loss, secrets, doc truth) are addressed.
+        return {
+          allowed: false,
+          reason: 'No enterprise build preflight found. New features on medium/high-risk files require ' +
+            'check_before_build to declare how E1-E14 enterprise baseline items will be satisfied.',
+          suggestion: 'Run check_before_build with slice_name, plan_reference, planned_files, and structured_fields ' +
+            'before calling check_before_edit for new features. Non-deferrable items (security, ownership, ' +
+            'crash prevention, data loss, secrets, documentation truth) must be addressed — "will handle later" is rejected.',
+          edits_remaining: 0,
+          maturityMode: maturity.mode,
+        };
       } else if (Date.now() - buildState.timestamp > BUILD_PREFLIGHT_MAX_AGE_MS) {
         warnings.push(
           `Enterprise build preflight is stale (ran ${Math.round((Date.now() - buildState.timestamp) / 60000)} minutes ago). ` +
