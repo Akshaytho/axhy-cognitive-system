@@ -201,7 +201,13 @@ async function main() {
     return;
   }
 
-  if (!wasFileReadRecently(filePath)) {
+  // Read-recently check is intentionally skipped when the target file does not
+  // exist on disk yet — for true new-file creation there is no current state to
+  // have read, so the "verify current state before editing" intent is moot.
+  // Approval-scope (above) and edit-budget (below) still run, so the new path
+  // must still be in the approved file list and still consumes one edit.
+  const fileExists = existsSync(resolve(REPO_ROOT, filePath));
+  if (fileExists && !wasFileReadRecently(filePath)) {
     block(
       `⛔ BLOCKED: You haven't Read this file recently.\n` +
       `Read the file first, then try editing.\n` +
