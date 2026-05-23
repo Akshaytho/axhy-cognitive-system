@@ -395,7 +395,9 @@ describe('Check Before Edit', async () => {
     });
     assert.equal(result.allowed, true);
     assert.equal(result.edits_remaining, 8);
-    assert.equal(result.confidence, 'high');
+    // Response shrinkage: confidence is now omitted on success path when score >= 90
+    // (the "All checks passed" reason was pure noise). High confidence is the implicit
+    // default when allowed === true and no confidence field is present.
     assert.ok(result.approved_files.length > 0);
   });
 
@@ -410,8 +412,10 @@ describe('Check Before Edit', async () => {
     assert.equal(result.allowed, false);
     assert.equal(result.requires_answer, true);
     assert.equal(result.edits_remaining, 1);
-    assert.ok(result.next_questions);
-    assert.ok(result.next_questions.primary.next_best_question.includes('CLAUDE.md'));
+    // Response shrinkage: next_questions (plural with duplicate primary+all)
+    // renamed to next_question (singular, no nesting).
+    assert.ok(result.next_question);
+    assert.ok(result.next_question.next_best_question.includes('CLAUDE.md'));
   });
 
   it('should block when hard blocks exist from impact check', () => {

@@ -183,28 +183,51 @@ export function checkBeforeEdit({
 
   writeGuardrailState(state);
 
-  return {
+  // Build response incrementally — only include fields with information value.
+  // Empty arrays, redundant duplicates, and "all checks passed" reasons
+  // are omitted to keep the iteration payload lean.
+  const missingDeps = buildMissingDeps({ fileWasRead, testsExist });
+  const response = {
     allowed: !requiresAnswer,
     approved_files: approvedFiles,
     edits_remaining: risk.editsAllowed,
-    expires: '5 minutes',
     requires_answer: requiresAnswer,
-    confidence: confidence.level,
-    confidence_score: confidence.score,
-    confidence_reason: confidence.reason,
-    missing_dependencies: buildMissingDeps({ fileWasRead, testsExist }),
     maturityMode: maturity.mode,
-    maturityDescription: maturity.description,
-    hardBlocks: [],
-    warnings,
-    staleChunks,
-    rules,
-    next_questions: nextQuestions ? {
-      primary: nextQuestions.primary,
-      all: nextQuestions.all,
-    } : null,
-    context,
   };
+
+  // Only include confidence info when it's actionable (below threshold)
+  if (confidence.score < 90) {
+    response.confidence = confidence.level;
+    response.confidence_score = confidence.score;
+    response.confidence_reason = confidence.reason;
+  }
+
+  // Only include missing_dependencies when there are some
+  if (missingDeps.length > 0) response.missing_dependencies = missingDeps;
+
+  // Only include warnings when there are some — they carry signal
+  if (warnings.length > 0) response.warnings = warnings;
+
+  // Only include stale chunks if any (they need verification)
+  if (staleChunks.length > 0) response.staleChunks = staleChunks;
+
+  // Rules and context: only top 3, truncated. Skip if empty.
+  if (rules.length > 0) response.rules = rules.slice(0, 3);
+  if (context.length > 0) {
+    response.context = context.slice(0, 3).map(c => ({
+      source: c.source,
+      similarity: c.similarity,
+      content: (c.content || '').slice(0, 100),
+    }));
+  }
+
+  // Only include primary question when answer is actually required.
+  // Drop the duplicate `all` array — primary already contains the actionable question.
+  if (requiresAnswer && nextQuestions?.primary) {
+    response.next_question = nextQuestions.primary;
+  }
+
+  return response;
 }
 
 function handleAnswerSubmission(answeredQuestion, evidence) {

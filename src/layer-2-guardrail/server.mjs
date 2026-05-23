@@ -6,6 +6,7 @@ import { checkBeforeEdit } from './check-before-edit.mjs';
 import { checkBeforePlan } from './check-before-plan.mjs';
 import { checkBeforeDone } from './check-before-done.mjs';
 import { checkBeforeBuild } from './check-before-build.mjs';
+import { checkBeforeCommit } from './check-before-commit.mjs';
 import { impactCheck, loadRealImpactCheck, isConnected } from './impact-adapter.mjs';
 import { classifyRisk } from '../layer-1-hook/risk-classifier.mjs';
 import { logApprovalCreated, logApprovalDenied } from './audit-log.mjs';
@@ -336,7 +337,90 @@ export async function handleDoneToolCall(args) {
   });
 }
 
-export { EDIT_TOOL_DEFINITION, PLAN_TOOL_DEFINITION, DONE_TOOL_DEFINITION, BUILD_TOOL_DEFINITION };
+const COMMIT_TOOL_DEFINITION = {
+  name: 'check_before_commit',
+  description: 'Call this ONCE before committing a slice. Runs batch slice-level production review: pattern pass (anti-patterns grouped across files), dependency pass (one-hop import/dependent analysis), surface pass (UI files require visual evidence manifest). Returns one consolidated checklist instead of per-file iteration. AI can challenge false positives with evidence via the challenges array. This replaces the per-file iteration spiral with one principal-engineer-style diff review.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      slice_name: {
+        type: 'string',
+        description: 'Name of the slice being committed (e.g., "worker-d1-s2b-2-capture-pipeline").',
+      },
+      changed_files: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'All files changed in this slice (paths relative to workspace root or absolute).',
+      },
+      tests_run: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Test commands that were executed for this slice. Must be non-empty.',
+      },
+      visual_evidence: {
+        type: 'object',
+        description: 'Visual evidence manifest. REQUIRED if any UI files (apps/mobile, apps/admin-web, components/*.tsx) changed. Filesystem timestamps alone are not sufficient — manifest forces structured proof.',
+        properties: {
+          command: { type: 'string', description: 'The visual test command that produced these screenshots (e.g., "pnpm test:visual worker-capture").' },
+          captured_at: { type: 'string', description: 'ISO timestamp when screenshots were captured.' },
+          screenshots: { type: 'array', items: { type: 'string' }, description: 'Paths to screenshot files. Must exist on disk.' },
+          ui_files_covered: { type: 'array', items: { type: 'string' }, description: 'UI files this visual test exercises.' },
+          ai_observations: { type: 'string', description: 'What you SAW in the screenshots — what changed, what looked correct, what looked wrong. Not just "captured". 10+ words.' },
+        },
+      },
+      reasoning_evidence: {
+        type: 'object',
+        description: 'Structured reasoning evidence (same shape as check_before_edit). Establishes what invariants stay intact across the slice.',
+        properties: {
+          invariants_preserved: { type: 'string' },
+          risk_if_wrong: { type: 'string' },
+          what_would_make_me_stop: { type: 'string' },
+          why_this_path_is_safe: { type: 'string' },
+          files_read: { type: 'array', items: { type: 'string' } },
+        },
+      },
+      challenges: {
+        type: 'array',
+        description: 'Challenges to specific findings as false positives. Each must include finding_id, file_path, line_number, explanation (15+ words with file:line references), and code_excerpt. Accepted challenges drop the finding from blockers; rejected challenges keep it. All challenges are logged for audit.',
+        items: {
+          type: 'object',
+          properties: {
+            finding_id: { type: 'string' },
+            file_path: { type: 'string' },
+            line_number: { type: 'number' },
+            explanation: { type: 'string' },
+            code_excerpt: { type: 'string' },
+          },
+        },
+      },
+      known_gaps: {
+        type: 'string',
+        description: 'Things you know are not covered by this slice but are acceptable. Honest boundary statement.',
+      },
+      founder_approved_deferrals: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'finding_ids that were explicitly deferred by founder approval. Empty array if none.',
+      },
+    },
+    required: ['slice_name', 'changed_files', 'tests_run'],
+  },
+};
+
+export async function handleCommitToolCall(args) {
+  return checkBeforeCommit({
+    sliceName: args.slice_name,
+    changedFiles: args.changed_files || [],
+    testsRun: args.tests_run || [],
+    visualEvidence: args.visual_evidence || null,
+    reasoningEvidence: args.reasoning_evidence || null,
+    challenges: args.challenges || [],
+    knownGaps: args.known_gaps || '',
+    founderApprovedDeferrals: args.founder_approved_deferrals || [],
+  });
+}
+
+export { EDIT_TOOL_DEFINITION, PLAN_TOOL_DEFINITION, DONE_TOOL_DEFINITION, BUILD_TOOL_DEFINITION, COMMIT_TOOL_DEFINITION };
 
 function send(msg) {
   const json = JSON.stringify(msg);
@@ -364,7 +448,7 @@ function handleMessage(msg) {
     return send({
       jsonrpc: '2.0',
       id,
-      result: { tools: [EDIT_TOOL_DEFINITION, PLAN_TOOL_DEFINITION, DONE_TOOL_DEFINITION, BUILD_TOOL_DEFINITION] },
+      result: { tools: [EDIT_TOOL_DEFINITION, PLAN_TOOL_DEFINITION, DONE_TOOL_DEFINITION, BUILD_TOOL_DEFINITION, COMMIT_TOOL_DEFINITION] },
     });
   }
 
@@ -381,6 +465,8 @@ function handleMessage(msg) {
       handler = handleDoneToolCall(args);
     } else if (toolName === 'check_before_build') {
       handler = handleBuildToolCall(args);
+    } else if (toolName === 'check_before_commit') {
+      handler = handleCommitToolCall(args);
     } else {
       return send({
         jsonrpc: '2.0',

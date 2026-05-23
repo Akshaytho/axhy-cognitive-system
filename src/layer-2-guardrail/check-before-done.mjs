@@ -1,21 +1,26 @@
 /**
- * check_before_done — blocks done-memo writes until quality gate passes.
+ * check_before_done — narrowed to integrity verification after commit.
  *
- * Flow:
- * 1. Session calls check_before_done with slice files + done memo path
- * 2. Quality gate runs pattern checks on every file
- * 3. If criticals or too many highs → BLOCKED with fix list
- * 4. Session fixes issues and re-calls check_before_done
- * 5. Repeat until grade >= L3 (Senior)
- * 6. Only then: done-memo write is approved
+ * Production code-quality scanning moved to `check_before_commit` (which
+ * runs ONCE on the whole slice via pattern/dependency/surface passes).
+ * Iterating quality scans here caused the 7-call spiral that cost the
+ * other session their token budget.
  *
- * The pre-edit-guard recognizes done-memo files and checks done-guardrail state.
+ * This gate now only verifies that the slice is properly closed out:
+ *   - commit landed (no uncommitted slice files)
+ *   - tests passed
+ *   - handoff/STATUS.md updated
+ *   - coverage notes substantive
+ *   - self-reasoning summary recorded
+ *   - enterprise preflight (check_before_build) was run for this slice
+ *   - screenshots taken if UI files in slice
+ *
+ * Quality before commit; reflection/integrity after commit.
  */
 
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { resolve, extname } from 'node:path';
-import { auditSliceFiles, gradeFindings } from './quality-gate.mjs';
 import {
   writeDoneGuardrailState,
   createDoneApprovalState,
@@ -165,58 +170,22 @@ export async function checkBeforeDone({
   if (preflightFailures.length > 0) {
     return {
       allowed: false,
-      reason: 'Preflight checks failed.',
+      reason: 'Integrity preflight failed.',
       preflight_failures: preflightFailures,
-      suggestion: 'Complete all preflight items, then re-call check_before_done.',
+      suggestion: 'Complete all preflight items, then re-call check_before_done. Production code quality is verified by check_before_commit BEFORE commit — this gate only verifies that the slice is properly closed out.',
     };
   }
 
-  const auditResult = auditSliceFiles(sliceFiles);
-
-  if (!auditResult.grade.pass) {
-    const criticals = auditResult.findings.filter(f => f.weight === 'critical');
-    const highs = auditResult.findings.filter(f => f.weight === 'high');
-
-    return {
-      allowed: false,
-      reason: `Quality gate: ${auditResult.grade.label} (${auditResult.grade.grade}). Required: Senior (L3)+.`,
-      grade: auditResult.grade,
-      must_fix: [
-        ...criticals.map(f => ({
-          severity: 'CRITICAL',
-          file: f.file,
-          check: f.checkId,
-          message: f.message,
-          occurrences: f.occurrences,
-        })),
-        ...highs.map(f => ({
-          severity: 'HIGH',
-          file: f.file,
-          check: f.checkId,
-          message: f.message,
-          occurrences: f.occurrences,
-        })),
-      ],
-      summary: auditResult.summary,
-      instruction: 'Fix all CRITICAL and reduce HIGH issues, then re-call check_before_done. The gate re-runs on every call until grade >= L3.',
-    };
-  }
-
-  const mediums = auditResult.findings.filter(f => f.weight === 'medium');
-  const lows = auditResult.findings.filter(f => f.weight === 'low');
-
+  // All integrity preflight checks passed. Approve done memo write.
+  // Note: production code quality scanning happens in check_before_commit
+  // (which runs ONCE on the slice). This gate does NOT iterate on patterns.
   const state = createDoneApprovalState({
     sliceName,
     doneMemoFile,
     sliceFiles,
-    grade: auditResult.grade,
-    summary: auditResult.summary,
-    remainingIssues: [...mediums, ...lows].map(f => ({
-      severity: f.weight.toUpperCase(),
-      file: f.file,
-      check: f.checkId,
-      message: f.message,
-    })),
+    grade: { grade: 'integrity_passed', label: 'Integrity Verified', pass: true },
+    summary: `${sliceName}: all integrity preflight checks passed. Quality was reviewed at commit time by check_before_commit.`,
+    remainingIssues: [],
     screenshotsTaken,
     typecheckPassed,
     testsPassed,
@@ -226,17 +195,10 @@ export async function checkBeforeDone({
 
   return {
     allowed: true,
-    grade: auditResult.grade,
     approved_file: doneMemoFile,
     edits_remaining: 1,
     expires: '10 minutes',
-    summary: auditResult.summary,
-    remaining_issues: [...mediums, ...lows].map(f => ({
-      severity: f.weight.toUpperCase(),
-      file: f.file,
-      check: f.checkId,
-      message: f.message,
-    })),
-    note: 'Quality gate passed. Done memo write approved. Remaining medium/low issues are noted but not blocking.',
+    summary: `${sliceName}: integrity verified. Done memo write approved.`,
+    note: 'check_before_done now verifies handoff/commit/test/coverage integrity only. Production code quality is enforced by check_before_commit (run ONCE on the slice diff). No more iteration spirals here.',
   };
 }
