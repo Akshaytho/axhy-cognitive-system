@@ -99,11 +99,36 @@ export async function vectorSearch(query, options = {}) {
   return [];
 }
 
+// B2: Estimate token cost of snippet results vs full content retrieval.
+// Rough heuristic: ~4 chars per token for English text.
+function estimateTokenEconomics(results) {
+  if (!results || results.length === 0) return null;
+  const snippetChars = results.reduce((sum, r) => sum + (r.content || '').length, 0);
+  const indexTokens = Math.ceil(snippetChars / 4);
+  // Full content is typically 10-25x larger than the 200-char snippets
+  const avgFullSize = 2000; // typical doc section is ~2000 chars
+  const fullContentTokens = Math.ceil((results.length * avgFullSize) / 4);
+  const ratio = fullContentTokens > 0 ? Math.round(fullContentTokens / Math.max(indexTokens, 1)) : 1;
+  return {
+    index_tokens_returned: indexTokens,
+    full_content_tokens_available: fullContentTokens,
+    savings_ratio: `${ratio}x`,
+    suggestion: results.length > 3
+      ? `Call impact_get([ids]) for the 2-3 most relevant entries only. Getting all ${results.length} would cost ~${fullContentTokens} tokens.`
+      : 'Few results — safe to get all if needed.',
+  };
+}
+
 // v2 search/timeline/get exports for MCP tools
 export async function impactSearch(args) {
   if (!v2Search) return { error: 'impact-check-v2 not loaded', results: [] };
   try {
-    return { results: await v2Search(args) };
+    const results = await v2Search(args);
+    const response = { results };
+    // B2: Token economics — teach the AI about retrieval cost
+    const economics = estimateTokenEconomics(results);
+    if (economics) response.token_economics = economics;
+    return response;
   } catch (err) {
     return { error: err.message, results: [] };
   }

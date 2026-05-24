@@ -499,10 +499,22 @@ const GET_TOOL_DEFINITION = {
   },
 };
 
+// B1: Workflow teaching tool — its description teaches the correct retrieval
+// pattern on every tools/list call. Calling it returns the full workflow text.
+const WORKFLOW_TOOL_DEFINITION = {
+  name: '__IMPORTANT_axhy_workflow',
+  description: 'IMPORTANT: Read this before using any impact_* tool. The axhy brain has 3 layers: (1) impact_search — returns SNIPPETS only (≤200 chars per result). Use this first to find relevant entries. (2) impact_get — returns FULL CONTENT for specific entry IDs. Use this after search to read entries that matter. (3) impact_timeline — returns temporal context around a specific entry. WORKFLOW: Always search first → scan snippets → get only the 2-3 entries you need. Never call impact_get with all IDs from search — that defeats the token savings. A typical search returns 10-20 snippets in ~2K tokens. Getting all of them would cost 20-50K tokens. Get only what you need.',
+  inputSchema: {
+    type: 'object',
+    properties: {},
+  },
+};
+
 export {
   EDIT_TOOL_DEFINITION, PLAN_TOOL_DEFINITION, DONE_TOOL_DEFINITION,
   BUILD_TOOL_DEFINITION, COMMIT_TOOL_DEFINITION,
   SEARCH_TOOL_DEFINITION, TIMELINE_TOOL_DEFINITION, GET_TOOL_DEFINITION,
+  WORKFLOW_TOOL_DEFINITION,
 };
 
 function send(msg) {
@@ -538,6 +550,7 @@ function handleMessage(msg) {
       jsonrpc: '2.0',
       id,
       result: { tools: [
+        WORKFLOW_TOOL_DEFINITION,
         EDIT_TOOL_DEFINITION, PLAN_TOOL_DEFINITION, DONE_TOOL_DEFINITION,
         BUILD_TOOL_DEFINITION, COMMIT_TOOL_DEFINITION,
         SEARCH_TOOL_DEFINITION, TIMELINE_TOOL_DEFINITION, GET_TOOL_DEFINITION,
@@ -548,6 +561,25 @@ function handleMessage(msg) {
   if (method === 'tools/call') {
     const toolName = params?.name;
     const args = params?.arguments || {};
+
+    // B1: __IMPORTANT_axhy_workflow is a no-op teaching tool — return workflow text immediately
+    if (toolName === '__IMPORTANT_axhy_workflow') {
+      return send({
+        jsonrpc: '2.0',
+        id,
+        result: { content: [{ type: 'text', text: JSON.stringify({
+          workflow: 'search → scan snippets → get only what you need',
+          steps: [
+            '1. impact_search(query) — returns snippets (≤200 chars). Costs ~2K tokens for 10-20 results.',
+            '2. Read snippets. Identify the 2-3 entries that matter.',
+            '3. impact_get([id1, id2]) — returns full content for those entries only.',
+            '4. impact_timeline(anchor_id) — optional, for temporal context around a decision.',
+          ],
+          anti_pattern: 'Never call impact_get with ALL IDs from search. That costs 20-50K tokens and defeats the 3-layer design.',
+          token_budget: 'A well-targeted search→get chain costs ~3-5K tokens. A naive full-content query costs 20-50K.',
+        }, null, 2) }] },
+      });
+    }
 
     if (!['check_before_edit', 'check_before_plan', 'check_before_done',
           'check_before_build', 'check_before_commit',
