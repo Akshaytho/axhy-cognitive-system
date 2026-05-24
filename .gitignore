@@ -3,3 +3,6 @@ node_modules/
 *.log
 .DS_Store
 docs/challenges/
+docs/activity/
+docs/scanner-proposals/*.json
+docs/audits/

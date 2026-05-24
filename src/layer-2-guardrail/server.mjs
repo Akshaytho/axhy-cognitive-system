@@ -533,12 +533,28 @@ const LIST_PROPOSALS_TOOL_DEFINITION = {
   },
 };
 
+// D4: Activity search tool — queries activity entries (kind='activity')
+// which are isolated from normal impactCheck results.
+const ACTIVITY_SEARCH_TOOL_DEFINITION = {
+  name: 'impact_activity_search',
+  description: 'Search activity entries (tool uses, prompts, session summaries). These are isolated from normal impact_search results. Use this to find what was done in past sessions — which tools were used, which files were touched, what prompts were given.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      query: { type: 'string', description: 'Natural language search query about past activity.' },
+      limit: { type: 'number', description: 'Max results to return (default: 10).' },
+    },
+    required: ['query'],
+  },
+};
+
 export {
   EDIT_TOOL_DEFINITION, PLAN_TOOL_DEFINITION, DONE_TOOL_DEFINITION,
   BUILD_TOOL_DEFINITION, COMMIT_TOOL_DEFINITION,
   SEARCH_TOOL_DEFINITION, TIMELINE_TOOL_DEFINITION, GET_TOOL_DEFINITION,
   WORKFLOW_TOOL_DEFINITION,
   APPROVE_EXCEPTION_TOOL_DEFINITION, LIST_PROPOSALS_TOOL_DEFINITION,
+  ACTIVITY_SEARCH_TOOL_DEFINITION,
 };
 
 function send(msg) {
@@ -579,6 +595,7 @@ function handleMessage(msg) {
         BUILD_TOOL_DEFINITION, COMMIT_TOOL_DEFINITION,
         SEARCH_TOOL_DEFINITION, TIMELINE_TOOL_DEFINITION, GET_TOOL_DEFINITION,
         APPROVE_EXCEPTION_TOOL_DEFINITION, LIST_PROPOSALS_TOOL_DEFINITION,
+        ACTIVITY_SEARCH_TOOL_DEFINITION,
       ] },
     });
   }
@@ -609,7 +626,8 @@ function handleMessage(msg) {
     if (!['check_before_edit', 'check_before_plan', 'check_before_done',
           'check_before_build', 'check_before_commit',
           'impact_search', 'impact_timeline', 'impact_get',
-          'approve_scanner_exception', 'list_scanner_proposals'].includes(toolName)) {
+          'approve_scanner_exception', 'list_scanner_proposals',
+          'impact_activity_search'].includes(toolName)) {
       return send({
         jsonrpc: '2.0',
         id,
@@ -643,6 +661,8 @@ function handleMessage(msg) {
           result = approveProposal(args.proposal_id);
         } else if (toolName === 'list_scanner_proposals') {
           result = listProposals();
+        } else if (toolName === 'impact_activity_search') {
+          result = await impactActivitySearch(args);
         }
         send({
           jsonrpc: '2.0',

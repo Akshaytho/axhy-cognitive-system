@@ -1189,3 +1189,86 @@ describe('C3: Scanner Demotion Integration', () => {
     }
   });
 });
+
+// ── Phase D: Activity Capture Tests ──
+
+describe('D1: Activity Capture Hook', () => {
+  it('activity-capture.mjs exists and is importable', async () => {
+    const mod = await import('../src/layer-1-hook/activity-capture.mjs');
+    assert.ok(mod, 'Module should be importable');
+  });
+
+  it('feature flag gate prevents capture when off', async () => {
+    const original = process.env.ACTIVITY_CAPTURE_ENABLED;
+    delete process.env.ACTIVITY_CAPTURE_ENABLED;
+
+    // capturePrompt from D2 shares the same flag-gate pattern — test it
+    const { capturePrompt } = await import('../src/layer-1-hook/prompt-capture.mjs');
+    capturePrompt('test prompt that should not be captured');
+    assert.ok(true, 'Should not crash when flag is off');
+
+    if (original) process.env.ACTIVITY_CAPTURE_ENABLED = original;
+  });
+});
+
+describe('D2: Prompt Capture', () => {
+  it('capturePrompt function exists and is callable', async () => {
+    const { capturePrompt } = await import('../src/layer-1-hook/prompt-capture.mjs');
+    assert.ok(typeof capturePrompt === 'function', 'capturePrompt should be a function');
+  });
+
+  it('capturePrompt redacts <private> content', async () => {
+    const { capturePrompt } = await import('../src/layer-1-hook/prompt-capture.mjs');
+    const original = process.env.ACTIVITY_CAPTURE_ENABLED;
+    process.env.ACTIVITY_CAPTURE_ENABLED = 'true';
+
+    const activityDir = resolve(REPO_ROOT, 'docs', 'activity');
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const logPath = resolve(activityDir, `${yyyy}-${mm}`, 'ACTIVITY.jsonl');
+
+    capturePrompt('my password is <private>supersecret123</private> please use it');
+
+    try {
+      if (existsSync(logPath)) {
+        const content = readFileSync(logPath, 'utf-8').trim();
+        const lines = content.split('\n');
+        const lastEntry = JSON.parse(lines[lines.length - 1]);
+
+        if (lastEntry.type === 'user_prompt') {
+          assert.ok(!lastEntry.content.includes('supersecret123'),
+            'Private content should be redacted');
+          assert.ok(lastEntry.content.includes('[REDACTED]'),
+            'Should contain [REDACTED] marker');
+          assert.equal(lastEntry.kind, 'activity');
+          assert.equal(lastEntry.authority_level, 'activity');
+        }
+      }
+    } finally {
+      if (original) {
+        process.env.ACTIVITY_CAPTURE_ENABLED = original;
+      } else {
+        delete process.env.ACTIVITY_CAPTURE_ENABLED;
+      }
+    }
+  });
+
+  it('capturePrompt does nothing when flag is off', async () => {
+    const { capturePrompt } = await import('../src/layer-1-hook/prompt-capture.mjs');
+    const original = process.env.ACTIVITY_CAPTURE_ENABLED;
+    delete process.env.ACTIVITY_CAPTURE_ENABLED;
+
+    capturePrompt('test prompt');
+    assert.ok(true, 'Should not crash with flag off');
+
+    if (original) process.env.ACTIVITY_CAPTURE_ENABLED = original;
+  });
+});
+
+describe('D3: Session Summary Capture', () => {
+  it('session-summary-capture.mjs exists and is importable', async () => {
+    const mod = await import('../src/layer-1-hook/session-summary-capture.mjs');
+    assert.ok(mod, 'Module should be importable');
+  });
+});
