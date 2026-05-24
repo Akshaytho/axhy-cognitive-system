@@ -21,7 +21,7 @@
  * Storage: docs/challenges/YYYY-MM/CHALLENGES.jsonl (append-only)
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, appendFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, appendFileSync, readdirSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -167,4 +167,143 @@ export function readRecentChallenges(maxEntries = 50) {
   }
 }
 
-export { CHALLENGES_DIR };
+/**
+ * C1: Read ALL accepted challenges across all monthly logs (last 90 days).
+ * Returns array of accepted challenge entries with pattern_id extracted.
+ */
+export function readAllAcceptedChallenges() {
+  if (!existsSync(CHALLENGES_DIR)) return [];
+
+  const accepted = [];
+  const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
+  const cutoff = new Date(Date.now() - NINETY_DAYS_MS).toISOString();
+
+  let dirs;
+  try {
+    dirs = readdirSync(CHALLENGES_DIR);
+  } catch {
+    return [];
+  }
+
+  for (const dir of dirs) {
+    const logPath = resolve(CHALLENGES_DIR, dir, 'CHALLENGES.jsonl');
+    if (!existsSync(logPath)) continue;
+
+    try {
+      const lines = readFileSync(logPath, 'utf-8').trim().split('\n');
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const entry = JSON.parse(line);
+          if (!entry.accepted) continue;
+          if (entry.timestamp < cutoff) continue;
+          const patternId = extractPatternId(entry.finding_id);
+          accepted.push({ ...entry, pattern_id: patternId });
+        } catch {
+          // Skip malformed entries
+        }
+      }
+    } catch {
+      // Skip unreadable files
+    }
+  }
+
+  return accepted;
+}
+
+/**
+ * Extract pattern_id from finding_id.
+ * Format: "pattern_id:file_path:line_number" → "pattern_id"
+ * Handles simple IDs without colons too.
+ */
+function extractPatternId(findingId) {
+  if (!findingId || typeof findingId !== 'string') return 'unknown';
+  const firstColon = findingId.indexOf(':');
+  if (firstColon === -1) return findingId;
+  return findingId.slice(0, firstColon);
+}
+
+/**
+ * C1: Cluster accepted challenges by pattern_id.
+ * Returns Map<pattern_id, { count, challenges, contexts }>
+ */
+export function clusterAcceptedChallenges() {
+  const accepted = readAllAcceptedChallenges();
+  const clusters = new Map();
+
+  for (const entry of accepted) {
+    const pid = entry.pattern_id;
+    if (!clusters.has(pid)) {
+      clusters.set(pid, { count: 0, challenges: [], contexts: new Set() });
+    }
+    const cluster = clusters.get(pid);
+    cluster.count++;
+    cluster.challenges.push(entry);
+    if (entry.file_path) cluster.contexts.add(entry.file_path);
+  }
+
+  return clusters;
+}
+
+/**
+ * C1: Get patterns that should have severity demoted.
+ * Pattern is demoted when 3+ accepted challenges within 90 days.
+ *
+ * @returns {Map<string, 'warning'>} pattern_id → demoted severity
+ */
+export function getLearnedDemotions() {
+  if (process.env.LEARNED_EXCEPTIONS_ENABLED !== 'true') return new Map();
+
+  const clusters = clusterAcceptedChallenges();
+  const demotions = new Map();
+  const DEMOTION_THRESHOLD = 3;
+
+  for (const [patternId, cluster] of clusters) {
+    if (cluster.count >= DEMOTION_THRESHOLD) {
+      demotions.set(patternId, 'warning');
+    }
+  }
+
+  return demotions;
+}
+
+/**
+ * C2+C3: Read approved exceptions from docs/scanner-proposals/.
+ * Only returns proposals explicitly approved by the founder.
+ *
+ * @returns {Array<{ pattern_id, skip_pattern, approved_at, proposal_id }>}
+ */
+export function getApprovedExceptions() {
+  if (process.env.LEARNED_EXCEPTIONS_ENABLED !== 'true') return [];
+
+  const proposalsDir = resolve(COGNITIVE_ROOT, 'docs', 'scanner-proposals');
+  if (!existsSync(proposalsDir)) return [];
+
+  const exceptions = [];
+  let files;
+  try {
+    files = readdirSync(proposalsDir).filter(f => f.endsWith('.json'));
+  } catch {
+    return [];
+  }
+
+  for (const file of files) {
+    try {
+      const proposal = JSON.parse(readFileSync(resolve(proposalsDir, file), 'utf-8'));
+      if (proposal.approved && proposal.skip_rule) {
+        exceptions.push({
+          pattern_id: proposal.pattern_id,
+          skip_pattern: new RegExp(proposal.skip_rule.file_pattern || '$.^'),
+          approved_at: proposal.approved_at,
+          proposal_id: proposal.proposal_id,
+        });
+      }
+    } catch {
+      // Skip malformed proposals
+    }
+  }
+
+  return exceptions;
+}
+
+export { CHALLENGES_DIR, COGNITIVE_ROOT };

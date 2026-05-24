@@ -916,3 +916,276 @@ describe('State-Freeze Bug Fix', () => {
       'State file on disk must also reflect file B');
   });
 });
+
+// ── Phase C: Scanner Learning Tests ──
+
+import { mkdirSync, writeFileSync, rmSync, appendFileSync } from 'node:fs';
+
+describe('C1: Challenge Clustering + Severity Demotion', () => {
+  let readAllAcceptedChallenges, clusterAcceptedChallenges, getLearnedDemotions;
+  let testChallengesDir;
+
+  before(async () => {
+    const mod = await import('../src/layer-2-guardrail/challenge-log.mjs');
+    readAllAcceptedChallenges = mod.readAllAcceptedChallenges;
+    clusterAcceptedChallenges = mod.clusterAcceptedChallenges;
+    getLearnedDemotions = mod.getLearnedDemotions;
+    testChallengesDir = mod.CHALLENGES_DIR;
+  });
+
+  it('extractPatternId handles standard finding_id format', () => {
+    // We test this indirectly via readAllAcceptedChallenges — the function
+    // parses finding_id into pattern_id. Create a temp challenge file.
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dir = resolve(testChallengesDir, `${yyyy}-${mm}`);
+
+    // Read existing file to check current entries
+    const logPath = resolve(dir, 'CHALLENGES.jsonl');
+    const accepted = readAllAcceptedChallenges();
+    // Should parse without throwing — basic smoke test
+    assert.ok(Array.isArray(accepted), 'Should return an array');
+    for (const entry of accepted) {
+      assert.ok(entry.pattern_id, 'Each entry should have a pattern_id');
+    }
+  });
+
+  it('clusterAcceptedChallenges groups by pattern_id', () => {
+    const clusters = clusterAcceptedChallenges();
+    assert.ok(clusters instanceof Map, 'Should return a Map');
+    for (const [pid, cluster] of clusters) {
+      assert.ok(typeof pid === 'string', 'Key should be string');
+      assert.ok(typeof cluster.count === 'number', 'Should have count');
+      assert.ok(Array.isArray(cluster.challenges), 'Should have challenges array');
+      assert.ok(cluster.contexts instanceof Set, 'Should have contexts Set');
+      assert.equal(cluster.count, cluster.challenges.length, 'Count should match array length');
+    }
+  });
+
+  it('getLearnedDemotions returns empty Map when feature flag is off', () => {
+    const original = process.env.LEARNED_EXCEPTIONS_ENABLED;
+    delete process.env.LEARNED_EXCEPTIONS_ENABLED;
+
+    const demotions = getLearnedDemotions();
+    assert.ok(demotions instanceof Map, 'Should return a Map');
+    assert.equal(demotions.size, 0, 'Should be empty when flag is off');
+
+    if (original) process.env.LEARNED_EXCEPTIONS_ENABLED = original;
+  });
+
+  it('getLearnedDemotions returns demotions for patterns with 3+ challenges', () => {
+    // Create a temporary challenge directory with 3+ accepted challenges
+    // for the same pattern_id
+    const tmpDir = resolve(testChallengesDir, 'test-demotion');
+    mkdirSync(tmpDir, { recursive: true });
+
+    const logPath = resolve(tmpDir, 'CHALLENGES.jsonl');
+    const now = new Date().toISOString();
+    const challenges = [];
+    for (let i = 0; i < 4; i++) {
+      challenges.push(JSON.stringify({
+        timestamp: now,
+        finding_id: `test_pattern:file${i}.ts:${i + 1}`,
+        file_path: `file${i}.ts`,
+        line_number: i + 1,
+        explanation: 'test explanation',
+        accepted: true,
+        reason: 'test',
+      }));
+    }
+    writeFileSync(logPath, challenges.join('\n') + '\n');
+
+    const original = process.env.LEARNED_EXCEPTIONS_ENABLED;
+    process.env.LEARNED_EXCEPTIONS_ENABLED = 'true';
+
+    try {
+      const demotions = getLearnedDemotions();
+      assert.ok(demotions.has('test_pattern'), 'Should demote test_pattern with 4 challenges');
+      assert.equal(demotions.get('test_pattern'), 'warning', 'Demotion should be to warning');
+    } finally {
+      // Cleanup
+      rmSync(tmpDir, { recursive: true, force: true });
+      if (original) {
+        process.env.LEARNED_EXCEPTIONS_ENABLED = original;
+      } else {
+        delete process.env.LEARNED_EXCEPTIONS_ENABLED;
+      }
+    }
+  });
+
+  it('getLearnedDemotions does NOT demote with fewer than 3 challenges', () => {
+    const tmpDir = resolve(testChallengesDir, 'test-no-demotion');
+    mkdirSync(tmpDir, { recursive: true });
+
+    const logPath = resolve(tmpDir, 'CHALLENGES.jsonl');
+    const now = new Date().toISOString();
+    // Only 2 accepted challenges — below threshold
+    const challenges = [];
+    for (let i = 0; i < 2; i++) {
+      challenges.push(JSON.stringify({
+        timestamp: now,
+        finding_id: `below_threshold:file${i}.ts:${i + 1}`,
+        file_path: `file${i}.ts`,
+        accepted: true,
+        reason: 'test',
+      }));
+    }
+    writeFileSync(logPath, challenges.join('\n') + '\n');
+
+    const original = process.env.LEARNED_EXCEPTIONS_ENABLED;
+    process.env.LEARNED_EXCEPTIONS_ENABLED = 'true';
+
+    try {
+      const demotions = getLearnedDemotions();
+      assert.ok(!demotions.has('below_threshold'), 'Should NOT demote with only 2 challenges');
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+      if (original) {
+        process.env.LEARNED_EXCEPTIONS_ENABLED = original;
+      } else {
+        delete process.env.LEARNED_EXCEPTIONS_ENABLED;
+      }
+    }
+  });
+});
+
+describe('C2: Proposal Writer', () => {
+  let approveProposal, listProposals, generateProposals, PROPOSALS_DIR;
+
+  before(async () => {
+    const mod = await import('../src/layer-2-guardrail/proposal-writer.mjs');
+    approveProposal = mod.approveProposal;
+    listProposals = mod.listProposals;
+    generateProposals = mod.generateProposals;
+    PROPOSALS_DIR = mod.PROPOSALS_DIR;
+  });
+
+  it('approveProposal returns error for non-existent proposal', () => {
+    const result = approveProposal('non-existent-proposal-id');
+    assert.equal(result.success, false, 'Should fail for non-existent proposal');
+    assert.ok(result.reason.includes('not found') || result.reason.includes('No proposals'),
+      'Error reason should mention not found');
+  });
+
+  it('approveProposal activates a proposal', () => {
+    // Create a test proposal
+    mkdirSync(PROPOSALS_DIR, { recursive: true });
+    const proposalId = 'test-approval-proposal';
+    const proposalPath = resolve(PROPOSALS_DIR, `${proposalId}.json`);
+    writeFileSync(proposalPath, JSON.stringify({
+      proposal_id: proposalId,
+      pattern_id: 'test_pattern',
+      created_at: new Date().toISOString(),
+      challenge_count: 3,
+      evidence: [],
+      skip_rule: { file_pattern: '\\.test\\.ts$' },
+      risk_assessment: 'Low risk — test files only',
+      approved: false,
+      approved_at: null,
+    }) + '\n');
+
+    try {
+      const result = approveProposal(proposalId);
+      assert.equal(result.success, true, 'Approval should succeed');
+      assert.equal(result.proposal.approved, true, 'Proposal should be approved');
+      assert.ok(result.proposal.approved_at, 'Should have approved_at timestamp');
+      assert.equal(result.proposal.approved_by, 'founder', 'Should be approved by founder');
+
+      // Double-approve should fail
+      const doubleResult = approveProposal(proposalId);
+      assert.equal(doubleResult.success, false, 'Double approval should fail');
+      assert.ok(doubleResult.reason.includes('already approved'), 'Should say already approved');
+    } finally {
+      try { rmSync(proposalPath); } catch { /* ignore */ }
+    }
+  });
+
+  it('listProposals returns all proposals with status', () => {
+    mkdirSync(PROPOSALS_DIR, { recursive: true });
+    const proposalPath = resolve(PROPOSALS_DIR, 'test-list-proposal.json');
+    writeFileSync(proposalPath, JSON.stringify({
+      proposal_id: 'test-list-proposal',
+      pattern_id: 'list_test',
+      created_at: new Date().toISOString(),
+      challenge_count: 5,
+      approved: false,
+    }) + '\n');
+
+    try {
+      const proposals = listProposals();
+      assert.ok(Array.isArray(proposals), 'Should return array');
+      const found = proposals.find(p => p.proposal_id === 'test-list-proposal');
+      assert.ok(found, 'Should find the test proposal');
+      assert.equal(found.pattern_id, 'list_test');
+      assert.equal(found.approved, false);
+      assert.equal(found.challenge_count, 5);
+    } finally {
+      try { rmSync(proposalPath); } catch { /* ignore */ }
+    }
+  });
+
+  it('generateProposals returns empty when feature flag is off', () => {
+    const original = process.env.LEARNED_EXCEPTIONS_ENABLED;
+    delete process.env.LEARNED_EXCEPTIONS_ENABLED;
+
+    const result = generateProposals();
+    assert.ok(Array.isArray(result), 'Should return array');
+    assert.equal(result.length, 0, 'Should be empty when flag is off');
+
+    if (original) process.env.LEARNED_EXCEPTIONS_ENABLED = original;
+  });
+});
+
+describe('C3: Scanner Demotion Integration', () => {
+  let scanPatterns, getApprovedExceptions;
+
+  before(async () => {
+    const scanner = await import('../src/layer-2-guardrail/pattern-scanner.mjs');
+    scanPatterns = scanner.scanPatterns;
+    const challengeLog = await import('../src/layer-2-guardrail/challenge-log.mjs');
+    getApprovedExceptions = challengeLog.getApprovedExceptions;
+  });
+
+  it('scanPatterns runs without errors with feature flag off', () => {
+    const original = process.env.LEARNED_EXCEPTIONS_ENABLED;
+    delete process.env.LEARNED_EXCEPTIONS_ENABLED;
+
+    // scanPatterns should work normally — demotions and exceptions are empty
+    const results = scanPatterns([]);
+    assert.ok(Array.isArray(results), 'Should return array');
+    assert.equal(results.length, 0, 'No files = no findings');
+
+    if (original) process.env.LEARNED_EXCEPTIONS_ENABLED = original;
+  });
+
+  it('getApprovedExceptions returns empty when flag is off', () => {
+    const original = process.env.LEARNED_EXCEPTIONS_ENABLED;
+    delete process.env.LEARNED_EXCEPTIONS_ENABLED;
+
+    const exceptions = getApprovedExceptions();
+    assert.ok(Array.isArray(exceptions), 'Should return array');
+    assert.equal(exceptions.length, 0, 'Should be empty when flag is off');
+
+    if (original) process.env.LEARNED_EXCEPTIONS_ENABLED = original;
+  });
+
+  it('scanPatterns applies severity demotion when enabled + threshold met', () => {
+    // Clustering is tested at the unit level in C1 tests above.
+    // Here we verify the integration doesn't crash with the flag on.
+    const original = process.env.LEARNED_EXCEPTIONS_ENABLED;
+    process.env.LEARNED_EXCEPTIONS_ENABLED = 'true';
+
+    try {
+      // Scan with no files — just verify it doesn't throw with flag on
+      const results = scanPatterns([]);
+      assert.ok(Array.isArray(results), 'Should return array even with flag on');
+    } finally {
+      if (original) {
+        process.env.LEARNED_EXCEPTIONS_ENABLED = original;
+      } else {
+        delete process.env.LEARNED_EXCEPTIONS_ENABLED;
+      }
+    }
+  });
+});

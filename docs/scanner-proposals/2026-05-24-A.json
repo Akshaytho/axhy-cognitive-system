@@ -1,0 +1,121 @@
+{
+  "proposal_id": "2026-05-24-A",
+  "pattern_id": "A",
+  "created_at": "2026-05-24T15:12:49.383Z",
+  "challenge_count": 15,
+  "evidence": [
+    {
+      "timestamp": "2026-05-23T16:51:47.746Z",
+      "file_path": "src/layer-2-guardrail/pattern-scanner.mjs",
+      "line_number": 1,
+      "explanation": "On line 1 this is a real file existing on disk with explanation referencing specific line and reasoning about why this is not the pattern flagged here",
+      "finding_id": "A"
+    },
+    {
+      "timestamp": "2026-05-23T16:56:23.339Z",
+      "file_path": "/var/folders/jn/4pzksjdd261477p8czbyt4cr0000gn/T/axhy-commit-test-XWJ95V/chall/file4.ts",
+      "line_number": 1,
+      "explanation": "Detailed reason with line 1 reference proving this is not actually the pattern being flagged here in this specific case",
+      "finding_id": "A"
+    },
+    {
+      "timestamp": "2026-05-23T16:57:57.043Z",
+      "file_path": "/var/folders/jn/4pzksjdd261477p8czbyt4cr0000gn/T/axhy-commit-test-6avY9H/chall/file4.ts",
+      "line_number": 1,
+      "explanation": "Detailed reason with line 1 reference proving this is not actually the pattern being flagged here in this specific case",
+      "finding_id": "A"
+    },
+    {
+      "timestamp": "2026-05-23T16:58:04.149Z",
+      "file_path": "/var/folders/jn/4pzksjdd261477p8czbyt4cr0000gn/T/axhy-commit-test-PtbzX8/chall/file4.ts",
+      "line_number": 1,
+      "explanation": "Detailed reason with line 1 reference proving this is not actually the pattern being flagged here in this specific case",
+      "finding_id": "A"
+    },
+    {
+      "timestamp": "2026-05-23T17:00:17.684Z",
+      "file_path": "/var/folders/jn/4pzksjdd261477p8czbyt4cr0000gn/T/axhy-commit-test-SMBLwi/chall/file4.ts",
+      "line_number": 1,
+      "explanation": "Detailed reason with line 1 reference proving this is not actually the pattern being flagged here in this specific case",
+      "finding_id": "A"
+    },
+    {
+      "timestamp": "2026-05-23T17:00:33.826Z",
+      "file_path": "/var/folders/jn/4pzksjdd261477p8czbyt4cr0000gn/T/axhy-commit-test-juEDK6/chall/file4.ts",
+      "line_number": 1,
+      "explanation": "Detailed reason with line 1 reference proving this is not actually the pattern being flagged here in this specific case",
+      "finding_id": "A"
+    },
+    {
+      "timestamp": "2026-05-23T17:03:05.894Z",
+      "file_path": "/var/folders/jn/4pzksjdd261477p8czbyt4cr0000gn/T/axhy-commit-test-tm0TrN/chall/file4.ts",
+      "line_number": 1,
+      "explanation": "Detailed reason with line 1 reference proving this is not actually the pattern being flagged here in this specific case",
+      "finding_id": "A"
+    },
+    {
+      "timestamp": "2026-05-23T17:03:56.614Z",
+      "file_path": "/var/folders/jn/4pzksjdd261477p8czbyt4cr0000gn/T/axhy-commit-test-ECxNNZ/chall/file4.ts",
+      "line_number": 1,
+      "explanation": "Detailed reason with line 1 reference proving this is not actually the pattern being flagged here in this specific case",
+      "finding_id": "A"
+    },
+    {
+      "timestamp": "2026-05-23T17:04:10.979Z",
+      "file_path": "/var/folders/jn/4pzksjdd261477p8czbyt4cr0000gn/T/axhy-commit-test-1MtPDN/chall/file4.ts",
+      "line_number": 1,
+      "explanation": "Detailed reason with line 1 reference proving this is not actually the pattern being flagged here in this specific case",
+      "finding_id": "A"
+    },
+    {
+      "timestamp": "2026-05-23T17:05:27.536Z",
+      "file_path": "/var/folders/jn/4pzksjdd261477p8czbyt4cr0000gn/T/axhy-commit-test-qA0nrI/chall/file4.ts",
+      "line_number": 1,
+      "explanation": "Detailed reason with line 1 reference proving this is not actually the pattern being flagged here in this specific case",
+      "finding_id": "A"
+    },
+    {
+      "timestamp": "2026-05-24T12:44:49.485Z",
+      "file_path": "/var/folders/jn/4pzksjdd261477p8czbyt4cr0000gn/T/axhy-commit-test-sbq9Jo/chall/file4.ts",
+      "line_number": 1,
+      "explanation": "Detailed reason with line 1 reference proving this is not actually the pattern being flagged here in this specific case",
+      "finding_id": "A"
+    },
+    {
+      "timestamp": "2026-05-24T12:45:04.806Z",
+      "file_path": "/var/folders/jn/4pzksjdd261477p8czbyt4cr0000gn/T/axhy-commit-test-2MAhuf/chall/file4.ts",
+      "line_number": 1,
+      "explanation": "Detailed reason with line 1 reference proving this is not actually the pattern being flagged here in this specific case",
+      "finding_id": "A"
+    },
+    {
+      "timestamp": "2026-05-24T12:45:31.096Z",
+      "file_path": "/var/folders/jn/4pzksjdd261477p8czbyt4cr0000gn/T/axhy-commit-test-HUKJZw/chall/file4.ts",
+      "line_number": 1,
+      "explanation": "Detailed reason with line 1 reference proving this is not actually the pattern being flagged here in this specific case",
+      "finding_id": "A"
+    },
+    {
+      "timestamp": "2026-05-24T12:49:06.652Z",
+      "file_path": "/var/folders/jn/4pzksjdd261477p8czbyt4cr0000gn/T/axhy-commit-test-Z5hno3/chall/file4.ts",
+      "line_number": 1,
+      "explanation": "Detailed reason with line 1 reference proving this is not actually the pattern being flagged here in this specific case",
+      "finding_id": "A"
+    },
+    {
+      "timestamp": "2026-05-24T12:49:19.187Z",
+      "file_path": "/var/folders/jn/4pzksjdd261477p8czbyt4cr0000gn/T/axhy-commit-test-RppEpQ/chall/file4.ts",
+      "line_number": 1,
+      "explanation": "Detailed reason with line 1 reference proving this is not actually the pattern being flagged here in this specific case",
+      "finding_id": "A"
+    }
+  ],
+  "skip_rule": {
+    "file_pattern": "$.^",
+    "code_shape": null
+  },
+  "risk_assessment": "Pattern \"A\" was successfully challenged 15 times with substantive evidence. Common reason: On line 1 this is a real file existing on disk with explanation referencing specific line and reasoning about why this is not the pattern flagged here",
+  "approved": false,
+  "approved_at": null,
+  "approved_by": null
+}

@@ -21,6 +21,8 @@
 
 import { readFileSync, existsSync } from 'node:fs';
 import { getLearnedPatterns } from './review-learning-rules.mjs';
+import { getLearnedDemotions, getApprovedExceptions } from './challenge-log.mjs';
+import { generateProposals, logDemotion } from './proposal-writer.mjs';
 
 /**
  * Each pattern definition has:
@@ -397,6 +399,17 @@ export function scanPatterns(filePaths) {
     // Learned rules failed to load — continue with built-in patterns only
   }
 
+  // C1: Load learned demotions (pattern_id → 'warning') and approved exceptions.
+  // Both are gated behind LEARNED_EXCEPTIONS_ENABLED feature flag.
+  let demotions = new Map();
+  let approvedExceptions = [];
+  try {
+    demotions = getLearnedDemotions();
+    approvedExceptions = getApprovedExceptions();
+  } catch {
+    // Learning system failure is non-blocking — continue with baseline patterns
+  }
+
   for (const filePath of filePaths) {
     if (!existsSync(filePath)) continue;
     let content;
@@ -411,15 +424,31 @@ export function scanPatterns(filePaths) {
       // Calibration fix: per-pattern skip list (e.g., silent_catch skips test files)
       if (pattern.skipPattern && pattern.skipPattern.test(filePath)) continue;
 
+      // C2+C3: Check approved exceptions — skip pattern entirely for matching files
+      const exception = approvedExceptions.find(
+        e => e.pattern_id === pattern.id && e.skip_pattern.test(filePath)
+      );
+      if (exception) continue;
+
       const findings = pattern.scan(content, filePath);
       if (findings.length === 0) continue;
+
+      // C1: Apply severity demotion if this pattern has enough accepted challenges
+      const effectiveSeverity = demotions.has(pattern.id)
+        ? demotions.get(pattern.id)
+        : pattern.severity;
 
       if (!groups.has(pattern.id)) {
         groups.set(pattern.id, {
           pattern: pattern.id,
-          severity: pattern.severity,
+          severity: effectiveSeverity,
           description: pattern.description,
           occurrences: [],
+          // C1: Flag demoted patterns so the output shows what happened
+          ...(demotions.has(pattern.id) ? {
+            demoted: true,
+            original_severity: pattern.severity,
+          } : {}),
         });
       }
       const group = groups.get(pattern.id);
@@ -433,6 +462,15 @@ export function scanPatterns(filePaths) {
         });
       }
     }
+  }
+
+  // C2: After scanning, check if any patterns qualify for new skip proposals.
+  // This runs on every scan but only writes proposals when threshold is met
+  // and no existing proposal exists for that pattern.
+  try {
+    generateProposals();
+  } catch {
+    // Proposal generation failure is non-blocking
   }
 
   return [...groups.values()];

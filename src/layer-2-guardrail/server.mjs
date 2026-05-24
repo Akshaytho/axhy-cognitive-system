@@ -16,6 +16,7 @@ import { logApprovalCreated, logApprovalDenied } from './audit-log.mjs';
 import {
   getRepoRoot, getRepoHash, getTimeouts, getFileReadTimestamp,
 } from '../shared/config.mjs';
+import { approveProposal, listProposals } from './proposal-writer.mjs';
 
 // H7+L2 fix (2026-05-23): use centralized identity and config instead of local duplicates.
 const REPO_ROOT = getRepoRoot();
@@ -510,11 +511,34 @@ const WORKFLOW_TOOL_DEFINITION = {
   },
 };
 
+// C3: approve_scanner_exception — founder-only tool to activate skip proposals
+const APPROVE_EXCEPTION_TOOL_DEFINITION = {
+  name: 'approve_scanner_exception',
+  description: 'Founder-only: approve a scanner skip proposal. After the scanner learns that a pattern is frequently a false positive (3+ accepted challenges), it writes a proposal. This tool activates the approved exception so the pattern is skipped in matching context. Use list_scanner_proposals first to see pending proposals.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      proposal_id: { type: 'string', description: 'The proposal_id to approve (from list_scanner_proposals).' },
+    },
+    required: ['proposal_id'],
+  },
+};
+
+const LIST_PROPOSALS_TOOL_DEFINITION = {
+  name: 'list_scanner_proposals',
+  description: 'List all scanner skip proposals and their approval status. Shows pending and approved proposals with pattern_id, challenge count, and dates.',
+  inputSchema: {
+    type: 'object',
+    properties: {},
+  },
+};
+
 export {
   EDIT_TOOL_DEFINITION, PLAN_TOOL_DEFINITION, DONE_TOOL_DEFINITION,
   BUILD_TOOL_DEFINITION, COMMIT_TOOL_DEFINITION,
   SEARCH_TOOL_DEFINITION, TIMELINE_TOOL_DEFINITION, GET_TOOL_DEFINITION,
   WORKFLOW_TOOL_DEFINITION,
+  APPROVE_EXCEPTION_TOOL_DEFINITION, LIST_PROPOSALS_TOOL_DEFINITION,
 };
 
 function send(msg) {
@@ -554,6 +578,7 @@ function handleMessage(msg) {
         EDIT_TOOL_DEFINITION, PLAN_TOOL_DEFINITION, DONE_TOOL_DEFINITION,
         BUILD_TOOL_DEFINITION, COMMIT_TOOL_DEFINITION,
         SEARCH_TOOL_DEFINITION, TIMELINE_TOOL_DEFINITION, GET_TOOL_DEFINITION,
+        APPROVE_EXCEPTION_TOOL_DEFINITION, LIST_PROPOSALS_TOOL_DEFINITION,
       ] },
     });
   }
@@ -583,7 +608,8 @@ function handleMessage(msg) {
 
     if (!['check_before_edit', 'check_before_plan', 'check_before_done',
           'check_before_build', 'check_before_commit',
-          'impact_search', 'impact_timeline', 'impact_get'].includes(toolName)) {
+          'impact_search', 'impact_timeline', 'impact_get',
+          'approve_scanner_exception', 'list_scanner_proposals'].includes(toolName)) {
       return send({
         jsonrpc: '2.0',
         id,
@@ -613,6 +639,10 @@ function handleMessage(msg) {
           result = await impactTimeline(args);
         } else if (toolName === 'impact_get') {
           result = await impactGet(args);
+        } else if (toolName === 'approve_scanner_exception') {
+          result = approveProposal(args.proposal_id);
+        } else if (toolName === 'list_scanner_proposals') {
+          result = listProposals();
         }
         send({
           jsonrpc: '2.0',
