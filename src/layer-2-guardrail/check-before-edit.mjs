@@ -1,4 +1,6 @@
 
+import { readFileSync, existsSync, statSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { classifyRisk } from '../layer-1-hook/risk-classifier.mjs';
 import { validateIntent } from './intent-validator.mjs';
 import { validateEvidence, getRequiredFields } from './evidence-validator.mjs';
@@ -25,7 +27,7 @@ export function checkBeforeEdit({
   impactCheckResult = null,
 }) {
   if (answeredQuestion && evidence) {
-    return handleAnswerSubmission(answeredQuestion, evidence);
+    return handleAnswerSubmission(answeredQuestion, evidence, filePaths);
   }
 
   const intentResult = validateIntent(intent);
@@ -144,12 +146,28 @@ export function checkBeforeEdit({
     );
   }
 
+  // Read file content for concurrency analysis in next-question generator.
+  // Only read if file exists and is reasonable size (< 500KB).
+  let fileContent = null;
+  try {
+    const absPath = primaryFile.startsWith('/') ? primaryFile : resolve(process.cwd(), primaryFile);
+    if (existsSync(absPath)) {
+      const stats = statSync(absPath);
+      if (stats.size < 500 * 1024) {
+        fileContent = readFileSync(absPath, 'utf-8');
+      }
+    }
+  } catch {
+    // File read failed — proceed without content-based questions
+  }
+
   const nextQuestions = generateNextQuestion({
     filePath: primaryFile,
     intent,
     riskLevel: risk.level,
     fileWasRead,
     testsExist,
+    fileContent,
   });
 
   const confidence = calculateConfidence({
@@ -230,7 +248,7 @@ export function checkBeforeEdit({
   return response;
 }
 
-function handleAnswerSubmission(answeredQuestion, evidence) {
+function handleAnswerSubmission(answeredQuestion, evidence, filePaths = []) {
   const validation = validateAnswer(answeredQuestion, evidence);
   if (!validation.valid) {
     return {
@@ -240,7 +258,10 @@ function handleAnswerSubmission(answeredQuestion, evidence) {
     };
   }
 
-  const state = markQuestionAnswered(answeredQuestion, evidence);
+  // State-freeze fix: pass filePaths to markQuestionAnswered so it
+  // updates approved_files. Without this, answering a question for file B
+  // would return stale approved_files from file A's earlier approval.
+  const state = markQuestionAnswered(answeredQuestion, evidence, filePaths);
   if (!state) {
     return {
       allowed: false,

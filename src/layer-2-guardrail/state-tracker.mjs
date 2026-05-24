@@ -43,6 +43,14 @@ export function readGuardrailState() {
 }
 
 export function writeGuardrailState(state) {
+  // Timestamp guard: never overwrite a newer state with an older one.
+  // Prevents async race conditions where an earlier handler resolves
+  // after a later one and clobbers its approved_files.
+  const existing = readGuardrailState();
+  if (existing && existing.timestamp && state.timestamp
+      && existing.timestamp > state.timestamp) {
+    return; // Existing state is newer — skip write
+  }
   writeToAll('guardrail-state.json', state);
 }
 
@@ -71,12 +79,20 @@ export function createApprovalState({
   };
 }
 
-export function markQuestionAnswered(answeredQuestion, evidence) {
+export function markQuestionAnswered(answeredQuestion, evidence, filePaths = null) {
   const state = readGuardrailState();
   if (!state) return null;
   state.question_answered = true;
   state.answered_question = answeredQuestion;
   state.evidence = evidence;
+  // State-freeze fix: update approved_files when answering a question
+  // for a different file than what's currently in state. Without this,
+  // answering a question for file B keeps approved_files from file A.
+  if (filePaths && filePaths.length > 0) {
+    state.approved_files = filePaths;
+  }
+  // Refresh timestamp so this write passes the timestamp guard
+  state.timestamp = Date.now();
   writeGuardrailState(state);
   return state;
 }

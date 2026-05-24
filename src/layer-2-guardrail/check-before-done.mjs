@@ -67,6 +67,10 @@ export async function checkBeforeDone({
   screenshotsTaken = false,
   typecheckPassed = false,
   testsPassed = false,
+  typecheckCommand = '',
+  testCommand = '',
+  screenshotPaths = [],
+  flowCompleteness = [],
   coverageNotes = '',
   selfReasoningSummary = '',
   handoffUpdated = false,
@@ -101,22 +105,95 @@ export async function checkBeforeDone({
   }
 
   const preflightFailures = [];
+  const verificationResults = { typecheck: 'unknown', tests: 'unknown', screenshots: 'unknown' };
 
-  if (!typecheckPassed) {
-    preflightFailures.push('Typecheck has not passed — run typecheck and confirm green before done.');
-  }
-  if (!testsPassed) {
-    preflightFailures.push('Tests have not passed — run all tests for affected packages and confirm green.');
-  }
-
-  const hasUIFiles = sliceFiles.some(f => isUIFile(f));
-  if (hasUIFiles && !screenshotsTaken) {
+  // ── Typecheck: prefer programmatic verification over self-reported boolean ──
+  if (typecheckCommand && typeof typecheckCommand === 'string') {
+    try {
+      execSync(typecheckCommand, { encoding: 'utf-8', timeout: 30000, cwd: AXHY_V3_ROOT });
+      verificationResults.typecheck = 'verified_pass';
+    } catch (err) {
+      verificationResults.typecheck = 'verified_fail';
+      const output = (err.stdout || err.stderr || '').slice(0, 500);
+      preflightFailures.push(
+        `Typecheck FAILED (programmatic verification via "${typecheckCommand}").\n` +
+        `Output: ${output}\nFix type errors before declaring done.`
+      );
+    }
+  } else if (!typecheckPassed) {
+    verificationResults.typecheck = 'self_reported_fail';
     preflightFailures.push(
-      'UI files in slice but no screenshots taken. ' +
-      'You MUST capture screenshots of every screen/flow before declaring done. ' +
-      'Visual verification proves the feature works from a user perspective — ' +
-      'typecheck and tests only prove code correctness, not feature correctness.'
+      'Typecheck has not passed — run typecheck and confirm green before done. ' +
+      'Better: pass typecheck_command (e.g. "pnpm -r run typecheck") for programmatic verification.'
     );
+  } else {
+    verificationResults.typecheck = 'self_reported_pass';
+  }
+
+  // ── Tests: prefer programmatic verification over self-reported boolean ──
+  if (testCommand && typeof testCommand === 'string') {
+    try {
+      execSync(testCommand, { encoding: 'utf-8', timeout: 60000, cwd: AXHY_V3_ROOT });
+      verificationResults.tests = 'verified_pass';
+    } catch (err) {
+      verificationResults.tests = 'verified_fail';
+      const output = (err.stdout || err.stderr || '').slice(0, 500);
+      preflightFailures.push(
+        `Tests FAILED (programmatic verification via "${testCommand}").\n` +
+        `Output: ${output}\nFix failing tests before declaring done.`
+      );
+    }
+  } else if (!testsPassed) {
+    verificationResults.tests = 'self_reported_fail';
+    preflightFailures.push(
+      'Tests have not passed — run all tests for affected packages and confirm green. ' +
+      'Better: pass test_command (e.g. "pnpm --filter @axhy/backend test") for programmatic verification.'
+    );
+  } else {
+    verificationResults.tests = 'self_reported_pass';
+  }
+
+  // ── Screenshots: prefer path verification over self-reported boolean ──
+  const hasUIFiles = sliceFiles.some(f => isUIFile(f));
+  if (hasUIFiles) {
+    if (Array.isArray(screenshotPaths) && screenshotPaths.length > 0) {
+      const missing = screenshotPaths.filter(p => !existsSync(p));
+      if (missing.length > 0) {
+        verificationResults.screenshots = 'verified_fail';
+        preflightFailures.push(
+          `Screenshot paths declared but ${missing.length} file(s) not found on disk:\n` +
+          missing.map(p => '  ' + p).join('\n') +
+          '\nCapture screenshots before declaring done.'
+        );
+      } else {
+        verificationResults.screenshots = 'verified_pass';
+      }
+    } else if (!screenshotsTaken) {
+      verificationResults.screenshots = 'self_reported_fail';
+      preflightFailures.push(
+        'UI files in slice but no screenshots taken. ' +
+        'You MUST capture screenshots of every screen/flow before declaring done. ' +
+        'Visual verification proves the feature works from a user perspective — ' +
+        'typecheck and tests only prove code correctness, not feature correctness. ' +
+        'Better: pass screenshot_paths with actual file paths for verification.'
+      );
+    } else {
+      verificationResults.screenshots = 'self_reported_pass';
+    }
+  }
+
+  // ── Flow completeness: ensure all expected behaviors are enumerated ──
+  if (Array.isArray(flowCompleteness) && flowCompleteness.length > 0) {
+    const incomplete = flowCompleteness.filter(f =>
+      !f.verified || typeof f.description !== 'string' || f.description.trim().length < 5
+    );
+    if (incomplete.length > 0) {
+      preflightFailures.push(
+        `Flow completeness: ${incomplete.length} expected behavior(s) not verified:\n` +
+        incomplete.map(f => `  - ${f.description || '(no description)'}`).join('\n') +
+        '\nVerify each behavior works end-to-end before declaring done.'
+      );
+    }
   }
 
   if (!coverageNotes || coverageNotes.trim().length < 20) {
@@ -186,9 +263,11 @@ export async function checkBeforeDone({
     grade: { grade: 'integrity_passed', label: 'Integrity Verified', pass: true },
     summary: `${sliceName}: all integrity preflight checks passed. Quality was reviewed at commit time by check_before_commit.`,
     remainingIssues: [],
-    screenshotsTaken,
-    typecheckPassed,
-    testsPassed,
+    screenshotsTaken: verificationResults.screenshots.includes('pass'),
+    typecheckPassed: verificationResults.typecheck.includes('pass'),
+    testsPassed: verificationResults.tests.includes('pass'),
+    verificationResults,
+    flowCompleteness: flowCompleteness || [],
   });
 
   writeDoneGuardrailState(state);

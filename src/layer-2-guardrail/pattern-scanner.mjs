@@ -20,6 +20,7 @@
  */
 
 import { readFileSync, existsSync } from 'node:fs';
+import { getLearnedPatterns } from './review-learning-rules.mjs';
 
 /**
  * Each pattern definition has:
@@ -383,6 +384,19 @@ function findBlockCommentStart(line) {
 export function scanPatterns(filePaths) {
   const groups = new Map();
 
+  // Merge built-in patterns with learned rules from code reviews.
+  // Learned rules follow the same {id, severity, description, filePattern, scan} shape.
+  // Wrapped in try/catch so a bad learned rule never breaks built-in scanning.
+  let allPatterns = PATTERNS;
+  try {
+    const learned = getLearnedPatterns();
+    if (Array.isArray(learned) && learned.length > 0) {
+      allPatterns = [...PATTERNS, ...learned];
+    }
+  } catch {
+    // Learned rules failed to load — continue with built-in patterns only
+  }
+
   for (const filePath of filePaths) {
     if (!existsSync(filePath)) continue;
     let content;
@@ -392,7 +406,7 @@ export function scanPatterns(filePaths) {
     // legitimate in JavaScript/TypeScript source code.
     content = content.replace(/[​‌‍﻿­]/g, '');
 
-    for (const pattern of PATTERNS) {
+    for (const pattern of allPatterns) {
       if (!pattern.filePattern.test(filePath)) continue;
       // Calibration fix: per-pattern skip list (e.g., silent_catch skips test files)
       if (pattern.skipPattern && pattern.skipPattern.test(filePath)) continue;

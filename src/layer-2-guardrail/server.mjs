@@ -239,7 +239,31 @@ const DONE_TOOL_DEFINITION = {
       },
       tests_passed: {
         type: 'boolean',
-        description: 'Whether all tests for affected packages passed green.',
+        description: 'Whether all tests for affected packages passed green. Prefer test_command for programmatic verification.',
+      },
+      typecheck_command: {
+        type: 'string',
+        description: 'Shell command to run typecheck (e.g., "pnpm -r run typecheck"). If provided, runs programmatically instead of trusting typecheck_passed boolean.',
+      },
+      test_command: {
+        type: 'string',
+        description: 'Shell command to run tests (e.g., "pnpm --filter @axhy/backend test"). If provided, runs programmatically instead of trusting tests_passed boolean.',
+      },
+      screenshot_paths: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Absolute paths to screenshot files. If provided, verifies files exist on disk instead of trusting screenshots_taken boolean.',
+      },
+      flow_completeness: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            description: { type: 'string', description: 'Expected behavior (e.g., "Worker can submit photo and see confirmation").' },
+            verified: { type: 'boolean', description: 'Whether this behavior was verified end-to-end.' },
+          },
+        },
+        description: 'List of expected behaviors for the slice. Each must have description and verified=true.',
       },
       coverage_notes: {
         type: 'string',
@@ -334,6 +358,10 @@ export async function handleDoneToolCall(args) {
     screenshotsTaken: args.screenshots_taken || false,
     typecheckPassed: args.typecheck_passed || false,
     testsPassed: args.tests_passed || false,
+    typecheckCommand: args.typecheck_command || '',
+    testCommand: args.test_command || '',
+    screenshotPaths: args.screenshot_paths || [],
+    flowCompleteness: args.flow_completeness || [],
     coverageNotes: args.coverage_notes || '',
     selfReasoningSummary: args.self_reasoning_summary || '',
     handoffUpdated: args.handoff_updated || false,
@@ -482,6 +510,12 @@ function send(msg) {
   process.stdout.write(json + '\n');
 }
 
+// Serialization queue for async tool handlers.
+// Prevents race conditions where overlapping handlers (e.g., two
+// handleEditToolCall both awaiting impactCheck) resolve out of order
+// and overwrite each other's state files.
+let _toolQueue = Promise.resolve();
+
 function handleMessage(msg) {
   const { method, id, params } = msg;
 
@@ -515,24 +549,9 @@ function handleMessage(msg) {
     const toolName = params?.name;
     const args = params?.arguments || {};
 
-    let handler;
-    if (toolName === 'check_before_edit') {
-      handler = handleEditToolCall(args);
-    } else if (toolName === 'check_before_plan') {
-      handler = handlePlanToolCall(args);
-    } else if (toolName === 'check_before_done') {
-      handler = handleDoneToolCall(args);
-    } else if (toolName === 'check_before_build') {
-      handler = handleBuildToolCall(args);
-    } else if (toolName === 'check_before_commit') {
-      handler = handleCommitToolCall(args);
-    } else if (toolName === 'impact_search') {
-      handler = impactSearch(args);
-    } else if (toolName === 'impact_timeline') {
-      handler = impactTimeline(args);
-    } else if (toolName === 'impact_get') {
-      handler = impactGet(args);
-    } else {
+    if (!['check_before_edit', 'check_before_plan', 'check_before_done',
+          'check_before_build', 'check_before_commit',
+          'impact_search', 'impact_timeline', 'impact_get'].includes(toolName)) {
       return send({
         jsonrpc: '2.0',
         id,
@@ -540,19 +559,42 @@ function handleMessage(msg) {
       });
     }
 
-    handler.then(result => {
-      send({
-        jsonrpc: '2.0',
-        id,
-        result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] },
-      });
-    }).catch(err => {
-      send({
-        jsonrpc: '2.0',
-        id,
-        result: { content: [{ type: 'text', text: `Error: ${err.message}` }], isError: true },
-      });
-    });
+    // Serialize all tool handlers through _toolQueue to prevent async race
+    // conditions where overlapping handlers resolve out of order and
+    // overwrite each other's state files.
+    _toolQueue = _toolQueue.then(async () => {
+      try {
+        let result;
+        if (toolName === 'check_before_edit') {
+          result = await handleEditToolCall(args);
+        } else if (toolName === 'check_before_plan') {
+          result = await handlePlanToolCall(args);
+        } else if (toolName === 'check_before_done') {
+          result = await handleDoneToolCall(args);
+        } else if (toolName === 'check_before_build') {
+          result = await handleBuildToolCall(args);
+        } else if (toolName === 'check_before_commit') {
+          result = await handleCommitToolCall(args);
+        } else if (toolName === 'impact_search') {
+          result = await impactSearch(args);
+        } else if (toolName === 'impact_timeline') {
+          result = await impactTimeline(args);
+        } else if (toolName === 'impact_get') {
+          result = await impactGet(args);
+        }
+        send({
+          jsonrpc: '2.0',
+          id,
+          result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] },
+        });
+      } catch (err) {
+        send({
+          jsonrpc: '2.0',
+          id,
+          result: { content: [{ type: 'text', text: `Error: ${err.message}` }], isError: true },
+        });
+      }
+    }, () => {/* previous handler rejected — advance queue */});
     return;
   }
 

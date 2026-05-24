@@ -1,4 +1,4 @@
-export function generateNextQuestion({ filePath, intent, riskLevel, fileWasRead, testsExist }) {
+export function generateNextQuestion({ filePath, intent, riskLevel, fileWasRead, testsExist, fileContent }) {
   const questions = [];
 
   if (riskLevel === 'high') {
@@ -63,6 +63,32 @@ export function generateNextQuestion({ filePath, intent, riskLevel, fileWasRead,
       stop_condition: 'Migration has been reviewed for data safety and reversibility.',
       requires_answer: true,
     });
+  }
+
+  // Concurrency checklist — fires when file content contains patterns that
+  // suggest concurrent operations (Prisma mutations, timers, queues, workers).
+  // Requires 2+ signals to avoid false positives on simple CRUD files.
+  if (fileContent && typeof fileContent === 'string') {
+    const concurrencySignals = [
+      /\bprisma\.\w+\.(update|delete|create|upsert)\b/.test(fileContent),
+      /\bsetInterval\s*\(/.test(fileContent),
+      /\bsetTimeout\s*\(/.test(fileContent) && /\bawait\s+/.test(fileContent),
+      /\b(queue|enqueue|dequeue|pump|flush)\b/i.test(fileContent),
+      /\b(worker|background|cron|job)\b/i.test(fileContent),
+      /\bXState\b|\.send\s*\(|machine\.transition/.test(fileContent),
+      /\bPromise\.(all|race|allSettled)\b/.test(fileContent),
+    ].filter(Boolean).length;
+
+    if (concurrencySignals >= 2) {
+      questions.push({
+        current_uncertainty: `File contains ${concurrencySignals} concurrency signals (timers, mutations, queues, workers).`,
+        highest_risk_assumption: 'That concurrent operations cannot interleave and corrupt state.',
+        next_best_question: 'What happens if two instances of this operation run simultaneously? Is there transaction isolation, mutex, or idempotency protection?',
+        how_to_answer: 'read_file',
+        stop_condition: 'Race conditions have been considered and either prevented or documented as acceptable.',
+        requires_answer: true,
+      });
+    }
   }
 
   if (questions.length === 0) {

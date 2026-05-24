@@ -774,3 +774,145 @@ describe('Done-Memo Process Gates', async () => {
     }
   });
 });
+
+// ── State-Freeze Bug Fix Tests ──────────────────────────────────────────────
+// Regression tests for the bug where approved_files stayed frozen from a
+// previous request when answering questions for a different file.
+describe('State-Freeze Bug Fix', () => {
+  let writeGuardrailState, readGuardrailState, markQuestionAnswered, createApprovalState;
+
+  before(async () => {
+    const mod = await import('../src/layer-2-guardrail/state-tracker.mjs');
+    writeGuardrailState = mod.writeGuardrailState;
+    readGuardrailState = mod.readGuardrailState;
+    markQuestionAnswered = mod.markQuestionAnswered;
+    createApprovalState = mod.createApprovalState;
+  });
+
+  beforeEach(() => cleanState());
+  after(() => cleanState());
+
+  it('markQuestionAnswered should update approved_files when filePaths provided', () => {
+    // Simulate: file A gets approved first
+    const stateA = createApprovalState({
+      intent: 'editing file A for some valid reason with more than thirty words to pass the validator check',
+      approvedFiles: ['src/fileA.ts'],
+      editsRemaining: 3,
+    });
+    writeGuardrailState(stateA);
+
+    // Now answer a question for file B — approved_files should update
+    const result = markQuestionAnswered(
+      'The invariant is X and my change preserves it because Y',
+      ['src/fileB.ts:42 — the function signature confirms compatibility'],
+      ['src/fileB.ts']  // <-- the new filePaths
+    );
+
+    assert.ok(result, 'markQuestionAnswered should return state');
+    assert.deepEqual(result.approved_files, ['src/fileB.ts'],
+      'approved_files should update to file B when filePaths is passed');
+    assert.equal(result.question_answered, true);
+  });
+
+  it('markQuestionAnswered should keep original approved_files when filePaths is null', () => {
+    const stateA = createApprovalState({
+      intent: 'editing file A for a valid reason with enough words to pass the thirty word minimum check here',
+      approvedFiles: ['src/fileA.ts'],
+      editsRemaining: 3,
+    });
+    writeGuardrailState(stateA);
+
+    // Answer without providing new filePaths — original should persist
+    const result = markQuestionAnswered(
+      'The file was read and the current state is understood clearly',
+      ['Read output shows function at line 42']
+    );
+
+    assert.ok(result);
+    assert.deepEqual(result.approved_files, ['src/fileA.ts'],
+      'approved_files should stay unchanged when filePaths is null');
+  });
+
+  it('writeGuardrailState timestamp guard should prevent stale overwrite', () => {
+    // Simulate: newer state written first (e.g., from a later request)
+    const newerState = createApprovalState({
+      intent: 'newer request for file B with enough words to pass the intent validator check',
+      approvedFiles: ['src/fileB.ts'],
+      editsRemaining: 3,
+    });
+    writeGuardrailState(newerState);
+
+    // Now an older state tries to overwrite (e.g., from a slower async handler)
+    const olderState = createApprovalState({
+      intent: 'older request for file A with enough words to pass the intent validator check',
+      approvedFiles: ['src/fileA.ts'],
+      editsRemaining: 3,
+    });
+    olderState.timestamp = newerState.timestamp - 1000; // Force older timestamp
+
+    writeGuardrailState(olderState);
+
+    // The newer state should win
+    const current = readGuardrailState();
+    assert.deepEqual(current.approved_files, ['src/fileB.ts'],
+      'Timestamp guard should prevent older state from overwriting newer state');
+  });
+
+  it('writeGuardrailState should allow newer state to overwrite older', () => {
+    const olderState = createApprovalState({
+      intent: 'first request for file A with enough words to pass the intent validator minimum check',
+      approvedFiles: ['src/fileA.ts'],
+      editsRemaining: 3,
+    });
+    writeGuardrailState(olderState);
+
+    // A newer state should successfully overwrite
+    const newerState = createApprovalState({
+      intent: 'second request for file B with enough words to pass the intent validator minimum check',
+      approvedFiles: ['src/fileB.ts'],
+      editsRemaining: 3,
+    });
+    writeGuardrailState(newerState);
+
+    const current = readGuardrailState();
+    assert.deepEqual(current.approved_files, ['src/fileB.ts'],
+      'Newer state should successfully overwrite older state');
+  });
+
+  it('full flow: checkBeforeEdit answer submission updates approved_files', async () => {
+    const { checkBeforeEdit } = await import('../src/layer-2-guardrail/check-before-edit.mjs');
+
+    // Step 1: Approve file A (low-risk bug_fix, no question required, avoids build preflight)
+    const resultA = checkBeforeEdit({
+      intent: 'I want to fix a typo in the logging utility function in the utils folder that causes incorrect timestamps in development mode debug output when the application starts up and initializes the logger module for the first time',
+      filePaths: ['src/utils/logger.ts'],
+      changeType: 'bug_fix',
+      fileReadStatus: { 'src/utils/logger.ts': true },
+      testStatus: { 'src/utils/logger.ts': true },
+      impactCheckResult: null,
+    });
+    assert.equal(resultA.allowed, true, 'File A should be approved');
+    assert.deepEqual(resultA.approved_files, ['src/utils/logger.ts']);
+
+    // Step 2: Now answer a question for file B — simulating the bug scenario
+    const resultB = checkBeforeEdit({
+      intent: 'I want to fix a bug in the worker service that causes the state machine to get stuck in a pending state when the network connection drops during a status transition and the retry logic fails to recover gracefully',
+      filePaths: ['src/services/worker-service.ts'],
+      changeType: 'bug_fix',
+      answeredQuestion: 'What is the current content of src/services/worker-service.ts and what invariant does it enforce?',
+      evidence: ['Read the file at line 42-88. The invariant is that status transitions only go forward, never backward. My fix preserves this.'],
+      fileReadStatus: { 'src/services/worker-service.ts': true },
+      testStatus: { 'src/services/worker-service.ts': true },
+      impactCheckResult: null,
+    });
+
+    assert.equal(resultB.allowed, true, 'File B answer should be approved');
+    assert.deepEqual(resultB.approved_files, ['src/services/worker-service.ts'],
+      'BUG FIX: approved_files must update to file B, not stay frozen on file A');
+
+    // Step 3: Verify state file also reflects file B
+    const state = readGuardrailState();
+    assert.deepEqual(state.approved_files, ['src/services/worker-service.ts'],
+      'State file on disk must also reflect file B');
+  });
+});

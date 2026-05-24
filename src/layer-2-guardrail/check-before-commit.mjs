@@ -48,6 +48,7 @@ import { fileURLToPath } from 'node:url';
 import { scanPatterns } from './pattern-scanner.mjs';
 import { scanDependencies } from './dependency-scanner.mjs';
 import { scanSurface } from './surface-scanner.mjs';
+import { auditCrossFileConsistency } from './cross-file-auditor.mjs';
 import { applyChallenges } from './challenge-log.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -176,8 +177,28 @@ export function checkBeforeCommit(input) {
   const surfaceResult = scanSurface(absChangedFiles, visualEvidence);
   const surfaceFindings = surfaceResult.findings;
 
+  // ── Pass 4: Cross-file argument consistency ──
+  let crossFileFindings = [];
+  try {
+    const crossFileResult = auditCrossFileConsistency(absChangedFiles, searchRoot);
+    if (crossFileResult.mismatches && crossFileResult.mismatches.length > 0) {
+      crossFileFindings = crossFileResult.mismatches.map(m => ({
+        finding_id: `cross-file:${m.file}:${m.line}:${m.param}`,
+        severity: 'warning',
+        pattern: 'cross_file_entity_mismatch',
+        description: m.context,
+        file: m.file,
+        line: m.line,
+        snippet: m.snippet,
+        context: m.context,
+      }));
+    }
+  } catch {
+    // Cross-file audit failed — continue without it
+  }
+
   // ── Apply challenges ──
-  const allFindings = [...patternFindings, ...flatDeps, ...surfaceFindings];
+  const allFindings = [...patternFindings, ...flatDeps, ...surfaceFindings, ...crossFileFindings];
   const {
     remainingFindings,
     acceptedChallenges,
