@@ -149,6 +149,16 @@ function scanAsAnyCast(content) {
         context: 'Type assertion to any',
       });
     }
+    // Phase-0 fix (Bug 5): multi-line detection — `as` at end of line,
+    // `any` at start of next. Prettier won't produce this, but hand-written
+    // code or deliberate evasion might.
+    else if (/\bas\s*$/.test(lines[i]) && i + 1 < lines.length && /^\s*any\b(?!\w)/.test(lines[i + 1])) {
+      findings.push({
+        line: i + 1,
+        snippet: (lines[i].trim() + ' ' + lines[i + 1].trim()).slice(0, 120),
+        context: 'Multi-line type assertion to any',
+      });
+    }
   }
   return findings;
 }
@@ -263,18 +273,56 @@ function scanMissingTenantFilter(content) {
   return findings;
 }
 
+// Phase-0 fix (Bug 6): regex for issue-tracked TODOs. These reference active
+// tickets (TODO(#123), FIXME(JIRA-456)) and should NOT be flagged — they are
+// tracked work, not forgotten deferred work.
+const TRACKED_TODO_REGEX = /\b(TODO|FIXME)\s*\(\s*[#A-Z]+-?\d+\s*\)/;
+
 function scanTodoComments(content) {
   const findings = [];
   const lines = content.split('\n');
-  // Calibration fix: only match TODO/FIXME/HACK in actual COMMENT context.
-  // The naive check used to flag the scanner's own regex string literals
-  // ("TODO|FIXME|XXX|HACK" written as a regex was being detected).
+  // Phase-0 fix (Bug 6): track block comment state across lines.
+  // Previously only detected single-line // comments, missing:
+  //   /* TODO: fix this */
+  //   /** ... TODO ... */ (JSDoc)
+  let inBlockComment = false;
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+
+    // Inside a block comment: check for TODO and track end
+    if (inBlockComment) {
+      if (/\b(TODO|FIXME|XXX|HACK)\b/.test(line) && !TRACKED_TODO_REGEX.test(line)) {
+        findings.push({
+          line: i + 1,
+          snippet: line.trim().slice(0, 120),
+          context: 'Tracking comment in block comment',
+        });
+      }
+      if (line.includes('*/')) inBlockComment = false;
+      continue;
+    }
+
+    // Check for block comment start on this line (outside strings)
+    const blockStart = findBlockCommentStart(line);
+    if (blockStart !== -1) {
+      const afterBlock = line.slice(blockStart);
+      if (/\b(TODO|FIXME|XXX|HACK)\b/.test(afterBlock) && !TRACKED_TODO_REGEX.test(afterBlock)) {
+        findings.push({
+          line: i + 1,
+          snippet: line.trim().slice(0, 120),
+          context: 'Tracking comment in block comment',
+        });
+      }
+      if (!afterBlock.includes('*/')) inBlockComment = true;
+      continue;
+    }
+
+    // Single-line // comment check (existing logic)
     const commentStart = findCommentStart(line);
     if (commentStart === -1) continue;
     const commentPart = line.slice(commentStart);
-    if (/\b(TODO|FIXME|XXX|HACK)\b/.test(commentPart)) {
+    if (/\b(TODO|FIXME|XXX|HACK)\b/.test(commentPart) && !TRACKED_TODO_REGEX.test(commentPart)) {
       findings.push({
         line: i + 1,
         snippet: line.trim().slice(0, 120),
@@ -307,6 +355,26 @@ function findCommentStart(line) {
 }
 
 /**
+ * Find where a block comment starts on a line, outside string literals.
+ * Returns -1 if no block comment start found.
+ */
+function findBlockCommentStart(line) {
+  let inSingle = false, inDouble = false, inBacktick = false;
+  for (let i = 0; i < line.length - 1; i++) {
+    const ch = line[i];
+    const prev = i > 0 ? line[i - 1] : '';
+    if (prev === '\\') continue;
+    if (ch === "'" && !inDouble && !inBacktick) inSingle = !inSingle;
+    else if (ch === '"' && !inSingle && !inBacktick) inDouble = !inDouble;
+    else if (ch === '`' && !inSingle && !inDouble) inBacktick = !inBacktick;
+    else if (!inSingle && !inDouble && !inBacktick && ch === '/' && line[i + 1] === '*') {
+      return i;
+    }
+  }
+  return -1;
+}
+
+/**
  * Scan a set of files and return findings grouped by pattern.
  *
  * @param {string[]} filePaths - Absolute paths to changed files
@@ -319,6 +387,10 @@ export function scanPatterns(filePaths) {
     if (!existsSync(filePath)) continue;
     let content;
     try { content = readFileSync(filePath, 'utf-8'); } catch { continue; }
+    // Phase-0 fix (Bug 5): strip zero-width Unicode characters that could
+    // hide keywords from regex detection. These 5 codepoints are never
+    // legitimate in JavaScript/TypeScript source code.
+    content = content.replace(/[​‌‍﻿­]/g, '');
 
     for (const pattern of PATTERNS) {
       if (!pattern.filePattern.test(filePath)) continue;

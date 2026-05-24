@@ -68,13 +68,29 @@ async function main() {
       }
 
       if (!approved) {
-        // Generate new challenge
-        const token = randomBytes(3).toString('hex').toUpperCase(); // 6-char hex
-        writeFileSync(CHALLENGE_FILE, JSON.stringify({
-          token,
-          timestamp: Date.now(),
-          files: lockedMod.split('\n'),
-        }));
+        // Phase-0 fix: reuse unexpired challenge token instead of generating
+        // a fresh one every commit attempt. Previously each `git commit` overwrote
+        // the challenge with a new token, making the founder's response stale
+        // before they could re-commit (5+ failed cycles observed in Cluster A session).
+        let token = null;
+        if (existsSync(CHALLENGE_FILE)) {
+          try {
+            const existing = JSON.parse(readFileSync(CHALLENGE_FILE, 'utf-8'));
+            const age = Date.now() - (existing.timestamp || 0);
+            if (age < CHALLENGE_EXPIRY_MS && existing.token) {
+              token = existing.token; // reuse — founder may have already written this
+            }
+          } catch {} // corrupt file → generate fresh below
+        }
+
+        if (!token) {
+          token = randomBytes(3).toString('hex').toUpperCase(); // 6-char hex
+          writeFileSync(CHALLENGE_FILE, JSON.stringify({
+            token,
+            timestamp: Date.now(),
+            files: lockedMod.split('\n'),
+          }));
+        }
 
         log('locked', 'BLOCKED: Changes to docs/locked/ require founder approval.');
         log('locked', `Files: ${lockedMod}`);

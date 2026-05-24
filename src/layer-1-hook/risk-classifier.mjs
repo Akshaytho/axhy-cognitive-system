@@ -1,3 +1,4 @@
+import { getBudgets } from '../shared/config.mjs';
 
 const HIGH_RISK_PATTERNS = [
   /CLAUDE\.md$/,
@@ -52,17 +53,22 @@ const GUARDRAIL_OPTIONAL_PATTERNS = [
 ];
 
 export function classifyRisk(filePath) {
+  // Phase-0 fix: read budgets from config instead of hardcoding.
+  // Session-wide budgets (2hr window, generous edit counts) replace the
+  // per-edit budget that exhausted mid-work. check_before_commit is the
+  // quality gate that catches violations at commit time.
+  const budgets = getBudgets();
   for (const pattern of HIGH_RISK_PATTERNS) {
     if (pattern.test(filePath)) {
-      return { level: "high", editsAllowed: 1 };
+      return { level: "high", editsAllowed: budgets.high_risk_edits };
     }
   }
   for (const pattern of MEDIUM_RISK_PATTERNS) {
     if (pattern.test(filePath)) {
-      return { level: "medium", editsAllowed: 5 };
+      return { level: "medium", editsAllowed: budgets.medium_risk_edits };
     }
   }
-  return { level: "low", editsAllowed: 8 };
+  return { level: "low", editsAllowed: budgets.low_risk_edits };
 }
 
 export function isPlanFile(filePath) {

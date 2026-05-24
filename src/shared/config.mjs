@@ -33,14 +33,17 @@ const DEFAULTS = {
     '/Users/thotaakshay/eclean_workspace/axhy-cognitive-system',
   ],
   timeouts: {
-    approval_window_ms: 900000,       // 15 minutes
-    done_approval_window_ms: 1200000, // 20 minutes
-    read_window_ms: 600000,           // 10 minutes
+    approval_window_ms: 7200000,       // 2 hours — session budget (Phase-0 fix)
+    done_approval_window_ms: 7200000,  // 2 hours — session budget (Phase-0 fix)
+    read_window_ms: 600000,            // 10 minutes
   },
   budgets: {
-    high_risk_edits: 1,
-    medium_risk_edits: 5,
-    low_risk_edits: 8,
+    // Phase-0 fix: generous per-approval budgets. Sessions run 1-2 hours.
+    // check_before_edit still validates intent/evidence/risk per file.
+    // check_before_commit is the quality gate that catches violations at commit.
+    high_risk_edits: 50,
+    medium_risk_edits: 100,
+    low_risk_edits: 200,
   },
 };
 
