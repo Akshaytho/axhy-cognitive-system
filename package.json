@@ -14,7 +14,8 @@
     "test:integration": "node --test tests/integration.test.mjs",
     "verify": "node src/verify-install.mjs",
     "test:plan-content": "node --test src/layer-2-guardrail/plan-content-auditor.test.mjs",
-    "test:quality-gate": "node -e \"import('./src/layer-2-guardrail/quality-gate.mjs').then(({gradeFindings})=>{const r=gradeFindings([]);console.log(r.pass?'PASS':'FAIL',r.grade);process.exit(r.pass?0:1)})\""
+    "test:quality-gate": "node -e \"import('./src/layer-2-guardrail/quality-gate.mjs').then(({gradeFindings})=>{const r=gradeFindings([]);console.log(r.pass?'PASS':'FAIL',r.grade);process.exit(r.pass?0:1)})\"",
+    "test:retrieval": "AXHY_V3_ROOT=/Users/thotaakshay/eclean_workspace/axhy-v3 /Users/thotaakshay/eclean_workspace/axhy-v3/packages/ai-tools/node_modules/.bin/tsx --test tests/retrieval-quality.test.mjs"
   },
   "engines": {
     "node": ">=20"
