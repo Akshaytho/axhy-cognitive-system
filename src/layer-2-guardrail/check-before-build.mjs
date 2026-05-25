@@ -26,6 +26,7 @@ import {
   writeBuildGuardrailState,
   createBuildApprovalState,
 } from './state-tracker.mjs';
+import { loadRealImpactCheck, impactSearch } from './impact-adapter.mjs';
 
 /**
  * Each structured field maps to one E-item.
@@ -438,6 +439,40 @@ export async function checkBeforeBuild({
     };
   }
 
+  // --- Involuntary brain retrieval (structural gate) ---
+  // Previous sessions consistently skipped voluntary impactCheck() calls (CHEAT 12).
+  // By running impact_search here, brain consultation becomes involuntary —
+  // if the brain has locked constraints relevant to this slice, they surface
+  // automatically and cannot be ignored.
+  let brainResults = [];
+  let brainWarnings = [];
+  let brainError = null;
+  try {
+    await loadRealImpactCheck();
+    const searchQuery = `${sliceName} ${structuredFields.feature_goal || ''}`.trim();
+    const searchResponse = await impactSearch({
+      query: searchQuery,
+      limit: 10,
+      authority_level: ['locked', 'curated', 'candidate'],
+    });
+    if (searchResponse.error) {
+      brainError = searchResponse.error;
+    } else {
+      brainResults = searchResponse.results || [];
+      // Locked-authority results are mandatory warnings — AI must acknowledge them
+      for (const r of brainResults) {
+        if (r.authority_level === 'locked') {
+          brainWarnings.push(
+            `LOCKED CONSTRAINT [${r.type}]: "${r.title || r.snippet}" (relevance: ${r.score?.toFixed?.(2) || 'N/A'}). ` +
+            `Call impact_get(["${r.id}"]) to read the full constraint before coding.`
+          );
+        }
+      }
+    }
+  } catch (err) {
+    brainError = `Brain retrieval failed: ${err.message}`;
+  }
+
   // --- All items passed — create build approval state ---
   const state = createBuildApprovalState({
     sliceName,
@@ -448,6 +483,15 @@ export async function checkBeforeBuild({
       passed: passed.filter(p => p.eItem).map(p => p.eItem),
       na: naItems.filter(n => n.eItem).map(n => ({ id: n.eItem, reason: n.reason })),
     },
+    structuredFieldValues: structuredFields,
+    impactResults: brainResults.map(r => ({
+      id: r.id,
+      title: r.title,
+      type: r.type,
+      authority_level: r.authority_level,
+      score: r.score,
+      snippet: r.snippet,
+    })),
   });
 
   writeBuildGuardrailState(state);
@@ -462,7 +506,26 @@ export async function checkBeforeBuild({
     items_na: naItems.map(n => n.eItem ? `${n.eItem}: ${n.label} — ${n.reason}` : `${n.label} — ${n.reason}`),
     known_gaps: structuredFields.known_gaps || 'None declared',
     expires: '30 minutes',
-    note: 'Enterprise preflight passed. You may now proceed with coding. check_before_done will verify these items were addressed.',
+    // Brain retrieval results — involuntary, cannot be skipped
+    brain_retrieval: {
+      consulted: !brainError,
+      results_count: brainResults.length,
+      locked_constraints: brainWarnings,
+      error: brainError || undefined,
+      top_results: brainResults.slice(0, 5).map(r => ({
+        id: r.id,
+        title: r.title,
+        type: r.type,
+        authority: r.authority_level,
+        relevance: r.score?.toFixed?.(2) || 'N/A',
+        snippet: typeof r.snippet === 'string' ? r.snippet.substring(0, 150) : '',
+      })),
+    },
+    note: brainWarnings.length > 0
+      ? `Enterprise preflight passed. ${brainWarnings.length} locked constraint(s) found — review before coding. check_before_done will verify these items were addressed.`
+      : brainError
+        ? `Enterprise preflight passed. Brain retrieval failed (${brainError}) — proceed with caution, no locked constraints were checked.`
+        : 'Enterprise preflight passed. Brain consulted, no locked constraints conflict. check_before_done will verify these items were addressed.',
   };
 }
 

@@ -165,6 +165,8 @@ export function writeBuildGuardrailState(state) {
 export function createBuildApprovalState({
   sliceName, planReference, sliceScope, plannedFiles,
   checklist = { passed: [], na: [] },
+  structuredFieldValues = {},
+  impactResults = [],
 }) {
   return {
     timestamp: Date.now(), type: 'build',
@@ -173,6 +175,13 @@ export function createBuildApprovalState({
     slice_scope: sliceScope,
     planned_files: plannedFiles,
     checklist,
+    // Store the declared structured field values so check_before_done can diff
+    // what was declared at build time against what was actually delivered.
+    // This closes the "declare but don't deliver" gap (CHEAT 12 pattern).
+    structured_field_values: structuredFieldValues,
+    // Store brain retrieval results so check_before_done can verify locked
+    // constraints were addressed — involuntary brain consultation.
+    impact_results: impactResults,
     // Build approval does not gate individual file edits (that's check_before_edit).
     // It records that enterprise preflight was completed for this slice.
     // check_before_done references this state to verify preflight was run.

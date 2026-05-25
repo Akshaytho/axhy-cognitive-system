@@ -1,6 +1,6 @@
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, unlinkSync, readFileSync } from 'node:fs';
+import { existsSync, unlinkSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 
 import { fileURLToPath } from 'node:url';
@@ -23,7 +23,7 @@ function allHashes() {
 
 function cleanState() {
   for (const h of allHashes()) {
-    for (const suffix of ['guardrail-state.json', 'read-state.json', 'plan-guardrail-state.json', 'done-guardrail-state.json']) {
+    for (const suffix of ['guardrail-state.json', 'read-state.json', 'plan-guardrail-state.json', 'done-guardrail-state.json', 'build-guardrail-state.json']) {
       try { unlinkSync(`/tmp/axhy-${h}-${suffix}`); } catch {}
     }
   }
@@ -917,9 +917,233 @@ describe('State-Freeze Bug Fix', () => {
   });
 });
 
+// ── Build State: Structured Field Values + Impact Results ──────────────────
+// Tests that createBuildApprovalState stores declared field values and brain
+// retrieval results, which check_before_done uses for declaration-vs-delivery diff.
+describe('Build State: Structured Fields + Impact Results', () => {
+  let createBuildApprovalState, writeBuildGuardrailState, readBuildGuardrailState;
+
+  before(async () => {
+    const mod = await import('../src/layer-2-guardrail/state-tracker.mjs');
+    createBuildApprovalState = mod.createBuildApprovalState;
+    writeBuildGuardrailState = mod.writeBuildGuardrailState;
+    readBuildGuardrailState = mod.readBuildGuardrailState;
+  });
+
+  beforeEach(() => cleanState());
+  after(() => cleanState());
+
+  it('should store structuredFieldValues in build state', () => {
+    const fields = {
+      feature_goal: 'Add worker authentication endpoint',
+      security_boundary: 'JWT validation on every request with role-based access control',
+      tenant_and_resource_ownership: 'All queries filter by companyId from JWT claims',
+    };
+    const state = createBuildApprovalState({
+      sliceName: 'worker-auth',
+      planReference: 'plan.md',
+      sliceScope: 'backend',
+      plannedFiles: ['src/routes/auth.ts'],
+      structuredFieldValues: fields,
+    });
+    writeBuildGuardrailState(state);
+
+    const loaded = readBuildGuardrailState();
+    assert.ok(loaded.structured_field_values, 'Should have structured_field_values');
+    assert.equal(loaded.structured_field_values.feature_goal, fields.feature_goal);
+    assert.equal(loaded.structured_field_values.security_boundary, fields.security_boundary);
+  });
+
+  it('should store impactResults in build state', () => {
+    const impacts = [
+      { id: 'abc-123', title: 'Chat abuse prevention', type: 'locked_doc', authority_level: 'locked', score: 0.85, snippet: 'Rate limiting rules...' },
+      { id: 'def-456', title: 'Auth learning', type: 'learning', authority_level: 'curated', score: 0.72, snippet: 'Previous session...' },
+    ];
+    const state = createBuildApprovalState({
+      sliceName: 'worker-auth',
+      planReference: 'plan.md',
+      sliceScope: 'backend',
+      plannedFiles: ['src/routes/auth.ts'],
+      impactResults: impacts,
+    });
+    writeBuildGuardrailState(state);
+
+    const loaded = readBuildGuardrailState();
+    assert.ok(Array.isArray(loaded.impact_results), 'Should have impact_results array');
+    assert.equal(loaded.impact_results.length, 2);
+    assert.equal(loaded.impact_results[0].authority_level, 'locked');
+    assert.equal(loaded.impact_results[1].type, 'learning');
+  });
+
+  it('should default structuredFieldValues and impactResults to empty', () => {
+    const state = createBuildApprovalState({
+      sliceName: 'test-slice',
+      planReference: 'plan.md',
+      sliceScope: 'backend',
+      plannedFiles: [],
+    });
+    assert.deepEqual(state.structured_field_values, {});
+    assert.deepEqual(state.impact_results, []);
+  });
+});
+
+// ── Declaration-vs-Delivery Diff ──────────────────────────────────────────
+// Tests that check_before_done catches items declared in check_before_build
+// but not addressed in the done summary.
+describe('Declaration-vs-Delivery Diff', () => {
+  let checkBeforeDone, writeBuildGuardrailState, createBuildApprovalState;
+
+  const BUILD_STATE_FILE = `/tmp/axhy-${REPO_HASH}-build-guardrail-state.json`;
+
+  before(async () => {
+    const doneMod = await import(
+      join(__dirname, '..', 'src', 'layer-2-guardrail', 'check-before-done.mjs')
+    );
+    checkBeforeDone = doneMod.checkBeforeDone;
+
+    const stateMod = await import('../src/layer-2-guardrail/state-tracker.mjs');
+    writeBuildGuardrailState = stateMod.writeBuildGuardrailState;
+    createBuildApprovalState = stateMod.createBuildApprovalState;
+  });
+
+  beforeEach(() => cleanState());
+  after(() => cleanState());
+
+  const DONE_BASE = {
+    intent: 'Completed worker authentication endpoint with JWT validation and role-based access control, all queries filter by companyId from JWT claims, token refresh handles session loss on network interruption, no crash paths in backend route, JWT secret in environment variables only, tested with real database',
+    sliceName: 'worker-auth',
+    doneMemoFile: 'handoff/done-memo-test.md',
+    sliceFiles: ['package.json'],
+    typecheckPassed: true,
+    testsPassed: true,
+    coverageNotes: 'Covers auth routes with JWT validation, role checks, tenant isolation via companyId filtering, token refresh for data loss prevention, crash safety verified',
+    selfReasoningSummary: 'impactCheck returned no hardBlocks. Verified security boundary with JWT validation, tenant ownership via companyId, credentials stored as environment variables. No stale docs.',
+    handoffUpdated: true,
+  };
+
+  it('should PASS when done summary addresses all declared fields', async () => {
+    // Write build state with declarations that ARE addressed in done summary
+    const buildState = createBuildApprovalState({
+      sliceName: 'worker-auth',
+      planReference: 'plan.md',
+      sliceScope: 'backend',
+      plannedFiles: ['src/routes/auth.ts'],
+      structuredFieldValues: {
+        feature_goal: 'Add worker authentication endpoint',
+        security_boundary: 'JWT validation on every request with role-based access control',
+        tenant_and_resource_ownership: 'All queries filter by companyId from JWT claims',
+        data_loss_paths: 'Token refresh prevents session loss on network interruption',
+        app_store_crash_risks: 'No native crash paths in backend authentication route',
+        secrets_and_credentials: 'JWT secret stored in environment variables only',
+      },
+    });
+    writeBuildGuardrailState(buildState);
+
+    const result = await checkBeforeDone(DONE_BASE);
+    // Should not have declaration-vs-delivery failures
+    if (!result.allowed && result.preflight_failures) {
+      const declGaps = result.preflight_failures.filter(f => f.includes('Declaration-vs-delivery'));
+      assert.equal(declGaps.length, 0,
+        'Should NOT flag declaration-vs-delivery gap when done summary addresses declarations');
+    }
+  });
+
+  it('should CATCH gap when non-deferrable field not in done summary', async () => {
+    // Write build state with a security declaration about "websocket encryption"
+    // that is NOT mentioned anywhere in the done summary
+    const buildState = createBuildApprovalState({
+      sliceName: 'worker-auth',
+      planReference: 'plan.md',
+      sliceScope: 'backend',
+      plannedFiles: ['src/routes/auth.ts'],
+      structuredFieldValues: {
+        feature_goal: 'Add worker authentication endpoint',
+        security_boundary: 'Websocket encryption with TLS pinning for real-time messaging channels',
+        tenant_and_resource_ownership: 'All queries filter by companyId from JWT claims',
+        data_loss_paths: 'Token refresh prevents session loss on network interruption',
+        app_store_crash_risks: 'No native crash paths in backend authentication route',
+        secrets_and_credentials: 'Webhook signing keys rotated via vault integration system',
+      },
+    });
+    writeBuildGuardrailState(buildState);
+
+    const result = await checkBeforeDone(DONE_BASE);
+    assert.equal(result.allowed, false, 'Should block when declarations not in done summary');
+    const declGaps = result.preflight_failures.filter(f => f.includes('Declaration-vs-delivery'));
+    assert.ok(declGaps.length > 0, 'Should have declaration-vs-delivery gap');
+    // Should mention specific fields
+    const gapText = declGaps.join(' ');
+    assert.ok(
+      gapText.includes('security_boundary') || gapText.includes('secrets_and_credentials'),
+      'Should name the unaddressed field(s)'
+    );
+  });
+
+  it('should CATCH gap when locked constraint from brain not addressed', async () => {
+    const buildState = createBuildApprovalState({
+      sliceName: 'worker-auth',
+      planReference: 'plan.md',
+      sliceScope: 'backend',
+      plannedFiles: ['src/routes/auth.ts'],
+      structuredFieldValues: {
+        feature_goal: 'Add worker authentication endpoint',
+        security_boundary: 'JWT validation on every request with role-based access control',
+        tenant_and_resource_ownership: 'All queries filter by companyId from JWT claims',
+        data_loss_paths: 'Token refresh prevents session loss on network interruption',
+        app_store_crash_risks: 'No native crash paths in backend authentication route',
+        secrets_and_credentials: 'JWT secret stored in environment variables only',
+      },
+      impactResults: [
+        {
+          id: 'locked-xyz-789',
+          title: 'Mandatory biometric verification for supervisor escalation flows',
+          type: 'locked_doc',
+          authority_level: 'locked',
+          score: 0.91,
+          snippet: 'All supervisor escalation must include biometric verification step...',
+        },
+      ],
+    });
+    writeBuildGuardrailState(buildState);
+
+    const result = await checkBeforeDone(DONE_BASE);
+    assert.equal(result.allowed, false, 'Should block when locked constraint not addressed');
+    const declGaps = result.preflight_failures.filter(f => f.includes('Declaration-vs-delivery'));
+    assert.ok(declGaps.length > 0, 'Should have declaration-vs-delivery gap for locked constraint');
+    const gapText = declGaps.join(' ');
+    assert.ok(gapText.includes('locked_constraint'), 'Should identify it as a locked constraint gap');
+  });
+
+  it('should PASS when no structured_field_values in build state (backward compat)', async () => {
+    // Old-format build state without structured_field_values
+    const oldBuildState = {
+      timestamp: Date.now(),
+      type: 'build',
+      slice_name: 'worker-auth',
+      plan_reference: 'plan.md',
+      slice_scope: 'backend',
+      planned_files: ['src/routes/auth.ts'],
+      checklist: { passed: ['E1'], na: [] },
+      // No structured_field_values or impact_results
+    };
+    // Write directly to bypass createBuildApprovalState
+    for (const h of allHashes()) {
+      try { writeFileSync(`/tmp/axhy-${h}-build-guardrail-state.json`, JSON.stringify(oldBuildState)); } catch {}
+    }
+
+    const result = await checkBeforeDone(DONE_BASE);
+    // Should NOT crash or fail on missing structured_field_values
+    if (!result.allowed && result.preflight_failures) {
+      const declGaps = result.preflight_failures.filter(f => f.includes('Declaration-vs-delivery'));
+      assert.equal(declGaps.length, 0,
+        'Should NOT flag declaration-vs-delivery gap when build state has no structured_field_values');
+    }
+  });
+});
+
 // ── Phase C: Scanner Learning Tests ──
 
-import { mkdirSync, writeFileSync, rmSync, appendFileSync } from 'node:fs';
+import { mkdirSync, rmSync, appendFileSync } from 'node:fs';
 
 describe('C1: Challenge Clustering + Severity Demotion', () => {
   let readAllAcceptedChallenges, clusterAcceptedChallenges, getLearnedDemotions;

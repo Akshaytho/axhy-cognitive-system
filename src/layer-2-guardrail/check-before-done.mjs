@@ -59,6 +59,105 @@ function isUIFile(filePath) {
   return false;
 }
 
+/**
+ * Extract meaningful terms from a text block for keyword overlap checks.
+ * Filters out common English stop words and very short words.
+ */
+const STOP_WORDS = new Set([
+  'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had', 'was',
+  'one', 'our', 'out', 'has', 'have', 'this', 'that', 'with', 'from', 'will',
+  'each', 'make', 'like', 'been', 'long', 'very', 'when', 'what', 'were', 'into',
+  'them', 'more', 'some', 'time', 'just', 'also', 'than', 'must', 'every', 'does',
+  'being', 'only', 'would', 'should', 'could', 'about', 'which', 'their', 'there',
+  'these', 'other', 'after', 'before', 'using', 'used', 'need', 'needs', 'based',
+]);
+
+function extractKeyTerms(text) {
+  if (!text || typeof text !== 'string') return [];
+  return text.toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length >= 4 && !STOP_WORDS.has(w))
+    .slice(0, 25);
+}
+
+/**
+ * Non-deferrable fields — the ones sessions most often declare but skip.
+ * Maps to E1 (security), E2 (ownership), E6 (data loss), E8 (crash), E13 (secrets).
+ */
+const NON_DEFERRABLE_KEYS = [
+  'security_boundary',
+  'tenant_and_resource_ownership',
+  'data_loss_paths',
+  'app_store_crash_risks',
+  'secrets_and_credentials',
+];
+
+/**
+ * Compare declarations from check_before_build against done summary.
+ * Returns an array of delivery gaps (empty = all addressed).
+ *
+ * Heuristic: for each non-deferrable declaration, extract key terms and
+ * check whether the combined done text mentions any of them. If zero
+ * overlap, the declaration was likely not addressed.
+ *
+ * Also checks locked constraints from brain retrieval.
+ */
+function diffDeclarationsVsDelivery(buildState, intent, coverageNotes, selfReasoningSummary) {
+  const gaps = [];
+  const declared = buildState.structured_field_values;
+  if (!declared || typeof declared !== 'object') return gaps;
+
+  // Combine all done-time text for matching
+  const doneText = [
+    intent || '',
+    coverageNotes || '',
+    selfReasoningSummary || '',
+  ].join(' ').toLowerCase();
+
+  // Check each non-deferrable declaration
+  for (const key of NON_DEFERRABLE_KEYS) {
+    if (!declared[key]) continue;
+    const declaredText = typeof declared[key] === 'string'
+      ? declared[key]
+      : JSON.stringify(declared[key]);
+    const keyTerms = extractKeyTerms(declaredText);
+    if (keyTerms.length === 0) continue;
+
+    const matchedTerms = keyTerms.filter(t => doneText.includes(t));
+    // If less than 20% of key terms appear in done text, flag as gap
+    const overlapRatio = matchedTerms.length / keyTerms.length;
+    if (overlapRatio < 0.2) {
+      gaps.push({
+        field: key,
+        declared: declaredText.substring(0, 200),
+        concern: `Declared in build preflight but not mentioned in done summary (0/${keyTerms.length} key terms found)`,
+      });
+    }
+  }
+
+  // Check locked constraints from brain retrieval
+  const impactResults = buildState.impact_results;
+  if (Array.isArray(impactResults) && impactResults.length > 0) {
+    const lockedResults = impactResults.filter(r => r.authority_level === 'locked');
+    for (const r of lockedResults) {
+      const title = (r.title || r.snippet || '');
+      const titleTerms = extractKeyTerms(title);
+      if (titleTerms.length === 0) continue;
+      const mentioned = titleTerms.some(t => doneText.includes(t));
+      if (!mentioned) {
+        gaps.push({
+          field: `locked_constraint`,
+          declared: title.substring(0, 200),
+          concern: 'Locked constraint surfaced during build preflight but not addressed in done summary',
+        });
+      }
+    }
+  }
+
+  return gaps;
+}
+
 export async function checkBeforeDone({
   intent,
   sliceName,
@@ -242,6 +341,21 @@ export async function checkBeforeDone({
       `Enterprise preflight exists but for a different slice ("${buildState.slice_name}" vs "${sliceName}"). ` +
       'Run check_before_build for the current slice, then re-call check_before_done.'
     );
+  } else {
+    // --- Declaration-vs-delivery diff ---
+    // Build state matches this slice. Compare what was declared at build time
+    // against what the done summary claims was delivered.
+    // Non-deferrable fields (security, ownership, data loss, crash, secrets)
+    // get extra scrutiny — these are the items sessions most often declare but skip.
+    const deliveryGaps = diffDeclarationsVsDelivery(buildState, intent, coverageNotes, selfReasoningSummary);
+    if (deliveryGaps.length > 0) {
+      preflightFailures.push(
+        `Declaration-vs-delivery gap: ${deliveryGaps.length} item(s) declared during ` +
+        `check_before_build were not addressed in the done summary:\n` +
+        deliveryGaps.map(g => `  - [${g.field}] ${g.concern}`).join('\n') +
+        '\n\nEither address these items in your done summary or explain why they are no longer applicable.'
+      );
+    }
   }
 
   if (preflightFailures.length > 0) {

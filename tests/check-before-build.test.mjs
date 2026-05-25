@@ -842,8 +842,11 @@ describe('Done-Memo — Enterprise Preflight Reference', async () => {
 
     const result = await checkBeforeDone(BASE_ARGS);
     if (!result.allowed && result.preflight_failures) {
+      // Filter for enterprise preflight existence/mismatch failures only —
+      // NOT declaration-vs-delivery diff (tested separately in layer-2-guardrail.test.mjs)
       const buildFailures = result.preflight_failures.filter(f =>
-        f.includes('enterprise') || f.includes('preflight')
+        (f.includes('enterprise production preflight') || f.includes('different slice'))
+        && !f.includes('Declaration-vs-delivery')
       );
       assert.equal(buildFailures.length, 0, 'No enterprise preflight failures when build state matches');
     }
