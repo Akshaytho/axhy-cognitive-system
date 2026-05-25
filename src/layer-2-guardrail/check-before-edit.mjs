@@ -13,6 +13,7 @@ import {
   markQuestionAnswered,
   createApprovalState,
   readBuildGuardrailState,
+  verifyPlannedFileHashes,
 } from './state-tracker.mjs';
 
 export function checkBeforeEdit({
@@ -130,11 +131,37 @@ export function checkBeforeEdit({
           edits_remaining: 0,
           maturityMode: maturity.mode,
         };
-      } else if (Date.now() - buildState.timestamp > BUILD_PREFLIGHT_MAX_AGE_MS) {
-        warnings.push(
-          `Enterprise build preflight is stale (ran ${Math.round((Date.now() - buildState.timestamp) / 60000)} minutes ago). ` +
-          'Consider re-running check_before_build if starting a new slice.'
-        );
+      } else {
+        // --- Stale pre-approval gate (hash-based invalidation) ---
+        // If planned files changed since approval, the approval is stale.
+        // Catches the scenario: founder approves slice at 8pm, makes changes
+        // overnight, new session boots with stale approval and builds against
+        // outdated assumptions. Time-based staleness (30min) only catches
+        // elapsed time — this catches actual content drift.
+        if (buildState.planned_file_hashes) {
+          const hashCheck = verifyPlannedFileHashes(buildState.planned_file_hashes);
+          if (!hashCheck.valid) {
+            const driftList = hashCheck.driftedFiles.map(d => `  - ${d.file} (${d.reason})`).join('\n');
+            return {
+              allowed: false,
+              reason: 'Build pre-approval is stale — planned files changed since approval.',
+              suggestion: `The following files changed since check_before_build ran:\n${driftList}\n\n` +
+                'Re-run check_before_build to create a fresh approval based on the current codebase state. ' +
+                'The previous approval was based on file contents that no longer match.',
+              edits_remaining: 0,
+              maturityMode: maturity.mode,
+              stale_files: hashCheck.driftedFiles,
+            };
+          }
+        }
+
+        // Time-based staleness warning (still useful even when hashes match)
+        if (Date.now() - buildState.timestamp > BUILD_PREFLIGHT_MAX_AGE_MS) {
+          warnings.push(
+            `Enterprise build preflight is stale (ran ${Math.round((Date.now() - buildState.timestamp) / 60000)} minutes ago). ` +
+            'Consider re-running check_before_build if starting a new slice.'
+          );
+        }
       }
     } catch {
       // Non-blocking: if build state read fails, continue without warning

@@ -50,6 +50,8 @@ import { scanDependencies } from './dependency-scanner.mjs';
 import { scanSurface } from './surface-scanner.mjs';
 import { auditCrossFileConsistency } from './cross-file-auditor.mjs';
 import { applyChallenges } from './challenge-log.mjs';
+import { readBuildGuardrailState, readDoneGuardrailState } from './state-tracker.mjs';
+import { logSkipAcknowledgment } from './audit-log.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const COGNITIVE_ROOT = resolve(__dirname, '..', '..');
@@ -160,6 +162,39 @@ export function checkBeforeCommit(input) {
       summary: 'No tests run',
       blockers: [{ message: 'tests_run must list test commands that were executed for this slice' }],
     };
+  }
+
+  // ── Mandatory done-checkpoint gate ──
+  // If a build approval exists for this slice, check_before_done MUST have
+  // been called before commit. This prevents sessions from shipping slices
+  // without the self-audit at slice-close (the "confident session skips
+  // advisory steps" pattern identified by the 45-year AI principal).
+  //
+  // Only gated when a build state exists for the SAME slice — operational
+  // commits (hotfixes, config changes) without a build state are unaffected.
+  try {
+    const buildState = readBuildGuardrailState();
+    if (buildState && buildState.slice_name === sliceName) {
+      const doneState = readDoneGuardrailState();
+      if (!doneState || doneState.slice_name !== sliceName) {
+        return {
+          passed: false,
+          summary: `Blocked: check_before_done not called for slice "${sliceName}"`,
+          blockers: [{
+            message: `Mandatory done-checkpoint missing. A build approval exists for slice "${sliceName}" ` +
+              'but check_before_done has not been called. The done-checkpoint verifies: ' +
+              'impactCheck was run, identity layer was read, tests passed, handoff updated, ' +
+              'and declarations match deliveries. Call check_before_done before committing.',
+            severity: 'blocker',
+            pattern: 'missing_done_checkpoint',
+          }],
+          done_checkpoint_required: true,
+          slice_name: sliceName,
+        };
+      }
+    }
+  } catch {
+    // Non-blocking: if state read fails, continue with the scanner pipeline
   }
 
   const absChangedFiles = changedFiles.map(toAbsolute);

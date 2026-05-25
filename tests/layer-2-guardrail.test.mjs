@@ -1595,3 +1595,242 @@ describe('D3: Session Summary Capture', () => {
     assert.ok(mod, 'Module should be importable');
   });
 });
+
+// ── Hash-Based Pre-Approval Invalidation ──────────────────────────────────
+// Tests that build approvals store file content hashes, and check_before_edit
+// detects when planned files change between sessions (stale approval gate).
+describe('Hash-Based Pre-Approval Invalidation', () => {
+  let computePlannedFileHashes, verifyPlannedFileHashes, createBuildApprovalState;
+  let writeBuildGuardrailState, checkBeforeEdit;
+
+  before(async () => {
+    const stateMod = await import('../src/layer-2-guardrail/state-tracker.mjs');
+    computePlannedFileHashes = stateMod.computePlannedFileHashes;
+    verifyPlannedFileHashes = stateMod.verifyPlannedFileHashes;
+    createBuildApprovalState = stateMod.createBuildApprovalState;
+    writeBuildGuardrailState = stateMod.writeBuildGuardrailState;
+    const editMod = await import('../src/layer-2-guardrail/check-before-edit.mjs');
+    checkBeforeEdit = editMod.checkBeforeEdit;
+  });
+
+  beforeEach(() => cleanState());
+  after(() => cleanState());
+
+  it('computePlannedFileHashes returns MD5 hashes for existing files', () => {
+    const hashes = computePlannedFileHashes(['package.json']);
+    assert.ok(hashes['package.json'], 'Should have a hash for package.json');
+    assert.equal(hashes['package.json'].length, 32, 'Hash should be 32-char MD5 hex');
+  });
+
+  it('computePlannedFileHashes returns new_file for non-existent files', () => {
+    const hashes = computePlannedFileHashes(['src/this-does-not-exist-xyz.ts']);
+    assert.equal(hashes['src/this-does-not-exist-xyz.ts'], 'new_file');
+  });
+
+  it('verifyPlannedFileHashes returns valid when hashes match', () => {
+    const hashes = computePlannedFileHashes(['package.json']);
+    const result = verifyPlannedFileHashes(hashes);
+    assert.equal(result.valid, true, 'Should be valid when file unchanged');
+  });
+
+  it('verifyPlannedFileHashes detects content drift', () => {
+    // Use a hash that doesn't match the actual file
+    const fakeHashes = { 'package.json': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' };
+    const result = verifyPlannedFileHashes(fakeHashes);
+    assert.equal(result.valid, false, 'Should detect drift');
+    assert.equal(result.driftedFiles.length, 1);
+    assert.equal(result.driftedFiles[0].reason, 'content_changed');
+  });
+
+  it('verifyPlannedFileHashes detects new_file that already exists', () => {
+    const hashes = { 'package.json': 'new_file' };
+    const result = verifyPlannedFileHashes(hashes);
+    assert.equal(result.valid, false, 'Should flag file that exists but was expected new');
+    assert.equal(result.driftedFiles[0].reason, 'new_file_already_exists');
+  });
+
+  it('createBuildApprovalState stores planned_file_hashes', () => {
+    const state = createBuildApprovalState({
+      sliceName: 'hash-test',
+      planReference: 'docs/plan.md',
+      sliceScope: 'backend',
+      plannedFiles: ['package.json'],
+    });
+    assert.ok(state.planned_file_hashes, 'Should have planned_file_hashes');
+    assert.ok(state.planned_file_hashes['package.json'], 'Should hash package.json');
+    assert.equal(state.planned_file_hashes['package.json'].length, 32);
+  });
+
+  it('check_before_edit blocks when build approval has drifted file hashes', () => {
+    // Create a build state with a fake hash that won't match current content
+    // Use a medium-risk path so the build preflight gate triggers.
+    // Hash check only runs inside: if (changeType === 'new_feature' && risk.level medium/high)
+    const mediumRiskFile = 'apps/backend/src/routes/visit.ts';
+    const buildState = createBuildApprovalState({
+      sliceName: 'drift-test',
+      planReference: 'docs/plan.md',
+      sliceScope: 'backend',
+      plannedFiles: [mediumRiskFile],
+    });
+    // Override hash to simulate drift (file content changed since approval)
+    buildState.planned_file_hashes[mediumRiskFile] = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+    writeBuildGuardrailState(buildState);
+
+    const result = checkBeforeEdit({
+      intent: 'Adding a new feature to the visit route handler to support hash-based invalidation for build pre-approvals across multiple sessions which detects when planned files have changed between sessions and blocks stale approvals from proceeding without re-evaluation of the current codebase state',
+      filePaths: [mediumRiskFile],
+      changeType: 'new_feature',
+      fileReadStatus: { [mediumRiskFile]: true },
+      testStatus: {},
+      reasoningEvidence: {
+        risk_if_wrong: 'If verifyPlannedFileHashes() in src/layer-2-guardrail/state-tracker.mjs line 95 returns false positive, check-before-edit.mjs line 135 blocks valid edits on apps/backend/src/routes/visit.ts permanently',
+        why_this_path_is_safe: 'Hash check at src/layer-2-guardrail/check-before-edit.mjs line 130 only compares stored MD5 hash vs current file content via createHash in state-tracker.mjs — no side effects on target file',
+        files_read: [mediumRiskFile, 'src/layer-2-guardrail/state-tracker.mjs'],
+      },
+    });
+
+    assert.equal(result.allowed, false, 'Should block when hashes drift');
+    assert.ok(result.reason.includes('stale'), 'Reason should mention stale approval');
+    assert.ok(result.stale_files, 'Should include stale_files in response');
+    // File doesn't exist on disk → drift detected as file_deleted.
+    // Both content_changed and file_deleted are valid drift reasons.
+    assert.ok(
+      ['content_changed', 'file_deleted'].includes(result.stale_files[0].reason),
+      `Expected content_changed or file_deleted, got: ${result.stale_files[0].reason}`
+    );
+  });
+});
+
+// ── Mandatory Done-Checkpoint Before Slice Commits ────────────────────────
+// Tests that check_before_commit rejects when a build state exists for the
+// slice but check_before_done has not been called.
+describe('Mandatory Done-Checkpoint Gate', () => {
+  let checkBeforeCommit, writeBuildGuardrailState, writeDoneGuardrailState;
+  let createBuildApprovalState, createDoneApprovalState;
+
+  before(async () => {
+    const commitMod = await import('../src/layer-2-guardrail/check-before-commit.mjs');
+    checkBeforeCommit = commitMod.checkBeforeCommit;
+    const stateMod = await import('../src/layer-2-guardrail/state-tracker.mjs');
+    writeBuildGuardrailState = stateMod.writeBuildGuardrailState;
+    writeDoneGuardrailState = stateMod.writeDoneGuardrailState;
+    createBuildApprovalState = stateMod.createBuildApprovalState;
+    createDoneApprovalState = stateMod.createDoneApprovalState;
+  });
+
+  beforeEach(() => cleanState());
+  after(() => cleanState());
+
+  it('should BLOCK commit when build state exists but done state is missing', () => {
+    // Create a build state for the slice
+    const buildState = createBuildApprovalState({
+      sliceName: 'done-gate-test',
+      planReference: 'docs/plan.md',
+      sliceScope: 'backend',
+      plannedFiles: ['src/test.ts'],
+    });
+    writeBuildGuardrailState(buildState);
+    // No done state created
+
+    const result = checkBeforeCommit({
+      sliceName: 'done-gate-test',
+      changedFiles: ['src/test.ts'],
+      testsRun: ['node --test tests/test.mjs'],
+    });
+
+    assert.equal(result.passed, false, 'Should block commit');
+    assert.ok(result.done_checkpoint_required, 'Should flag done_checkpoint_required');
+    assert.ok(result.blockers[0].message.includes('check_before_done'),
+      'Blocker should mention check_before_done');
+  });
+
+  it('should BLOCK commit when done state exists for a DIFFERENT slice', () => {
+    const buildState = createBuildApprovalState({
+      sliceName: 'slice-B',
+      planReference: 'docs/plan.md',
+      sliceScope: 'backend',
+      plannedFiles: ['src/test.ts'],
+    });
+    writeBuildGuardrailState(buildState);
+
+    const doneState = createDoneApprovalState({
+      sliceName: 'slice-A',  // Different slice!
+      doneMemoFile: 'docs/done/slice-a.md',
+      sliceFiles: ['src/other.ts'],
+      grade: { grade: 'integrity_passed', pass: true },
+      summary: 'slice-A done',
+    });
+    writeDoneGuardrailState(doneState);
+
+    const result = checkBeforeCommit({
+      sliceName: 'slice-B',
+      changedFiles: ['src/test.ts'],
+      testsRun: ['node --test tests/test.mjs'],
+    });
+
+    assert.equal(result.passed, false, 'Should block when done is for different slice');
+    assert.ok(result.done_checkpoint_required, 'Should flag done_checkpoint_required');
+  });
+
+  it('should ALLOW commit when done state matches the slice', () => {
+    const buildState = createBuildApprovalState({
+      sliceName: 'slice-C',
+      planReference: 'docs/plan.md',
+      sliceScope: 'backend',
+      plannedFiles: ['src/test.ts'],
+    });
+    writeBuildGuardrailState(buildState);
+
+    const doneState = createDoneApprovalState({
+      sliceName: 'slice-C',  // Same slice
+      doneMemoFile: 'docs/done/slice-c.md',
+      sliceFiles: ['src/test.ts'],
+      grade: { grade: 'integrity_passed', pass: true },
+      summary: 'slice-C done',
+    });
+    writeDoneGuardrailState(doneState);
+
+    const result = checkBeforeCommit({
+      sliceName: 'slice-C',
+      changedFiles: ['src/test.ts'],
+      testsRun: ['node --test tests/test.mjs'],
+    });
+
+    // Should proceed past the done-gate (may fail/pass on pattern scan — that's fine)
+    assert.ok(!result.done_checkpoint_required, 'Should NOT flag done_checkpoint_required');
+  });
+
+  it('should ALLOW commit when NO build state exists (operational commits)', () => {
+    // No build state, no done state — operational commit
+    const result = checkBeforeCommit({
+      sliceName: 'hotfix-123',
+      changedFiles: ['src/test.ts'],
+      testsRun: ['node --test tests/test.mjs'],
+    });
+
+    // Should proceed past the done-gate (not blocked by missing done state)
+    assert.ok(!result.done_checkpoint_required, 'Should NOT require done checkpoint for operational commits');
+  });
+});
+
+// ── Skip Acknowledgment Audit Logging ─────────────────────────────────────
+// Tests that skipped steps are logged to the audit trail for pattern analysis.
+describe('Skip Acknowledgment Audit Logging', () => {
+  it('logSkipAcknowledgment writes to audit log', async () => {
+    const { logSkipAcknowledgment, AUDIT_LOG_FILE } = await import('../src/layer-2-guardrail/audit-log.mjs');
+
+    logSkipAcknowledgment({
+      sliceName: 'test-slice',
+      skippedStep: 'impactCheck',
+      justification: 'Low-risk config change, no locked constraints expected',
+    });
+
+    assert.ok(existsSync(AUDIT_LOG_FILE), 'Audit log should exist');
+    const lines = readFileSync(AUDIT_LOG_FILE, 'utf-8').trim().split('\n');
+    const entry = JSON.parse(lines[lines.length - 1]);
+    assert.equal(entry.event, 'skip_acknowledged');
+    assert.equal(entry.slice_name, 'test-slice');
+    assert.equal(entry.skipped_step, 'impactCheck');
+    assert.ok(entry.justification.includes('Low-risk config change'));
+  });
+});

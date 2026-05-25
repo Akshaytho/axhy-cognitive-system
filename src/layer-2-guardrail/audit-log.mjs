@@ -65,6 +65,23 @@ export function logTamperDetected({ detail }) {
   logEvent('tamper_detected', { detail });
 }
 
+/**
+ * Log when a session acknowledges skipping a step with justification.
+ * Used by check_before_done when the session says "no, I didn't run X because Y."
+ * Over time, patterns emerge: "this AI always skips impactCheck on low-risk slices"
+ * — data the founder can use to decide which rules graduate to structural gates.
+ *
+ * The other session's request: "make the skipped responses logged, not just
+ * accepted-and-forgotten."
+ */
+export function logSkipAcknowledgment({ sliceName, skippedStep, justification }) {
+  logEvent('skip_acknowledged', {
+    slice_name: sliceName,
+    skipped_step: skippedStep,
+    justification: (justification || '').slice(0, 500),
+  });
+}
+
 export function getRecentEvents(windowMs = 30 * 60 * 1000) {
   if (!existsSync(AUDIT_LOG_FILE)) return [];
   try {

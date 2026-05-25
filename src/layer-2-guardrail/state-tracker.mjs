@@ -1,8 +1,10 @@
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { createHash } from 'node:crypto';
 import {
   getRepoHash, allHashes, getStateFilePath,
-  signState, readStateFromAny,
+  signState, readStateFromAny, getWorkspaceRoots,
 } from '../shared/config.mjs';
 
 const REPO_HASH = getRepoHash();
@@ -162,18 +164,127 @@ export function writeBuildGuardrailState(state) {
   writeToAll('build-guardrail-state.json', state);
 }
 
+/**
+ * Compute MD5 content hashes for a list of file paths.
+ * Used by createBuildApprovalState to snapshot planned files at approval time.
+ * check_before_edit compares these on first use — if any file changed since
+ * approval, the approval is stale and must be re-created.
+ *
+ * Missing files get hash 'new_file' (file doesn't exist yet at build time).
+ * This is intentional: if a "new" file already exists when the session starts
+ * editing, something changed between sessions and the approval should invalidate.
+ */
+export function computePlannedFileHashes(plannedFiles) {
+  const WORKSPACE_ROOTS = getWorkspaceRoots();
+  const hashes = {};
+  for (const filePath of plannedFiles) {
+    try {
+      // Resolve relative paths against workspace roots
+      let absPath = filePath;
+      if (!filePath.startsWith('/')) {
+        // Try each workspace root to find the file
+        let found = false;
+        for (const root of WORKSPACE_ROOTS) {
+          const candidate = resolve(root, filePath);
+          if (existsSync(candidate)) {
+            absPath = candidate;
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          hashes[filePath] = 'new_file';
+          continue;
+        }
+      }
+      if (existsSync(absPath)) {
+        const content = readFileSync(absPath, 'utf-8');
+        hashes[filePath] = createHash('md5').update(content).digest('hex');
+      } else {
+        hashes[filePath] = 'new_file';
+      }
+    } catch {
+      hashes[filePath] = 'unreadable';
+    }
+  }
+  return hashes;
+}
+
+/**
+ * Verify planned file hashes against current file contents.
+ * Returns { valid: true } if all hashes match, or
+ * { valid: false, driftedFiles: [...] } listing files that changed.
+ */
+export function verifyPlannedFileHashes(storedHashes) {
+  if (!storedHashes || typeof storedHashes !== 'object') return { valid: true };
+
+  const WORKSPACE_ROOTS = getWorkspaceRoots();
+  const driftedFiles = [];
+
+  for (const [filePath, storedHash] of Object.entries(storedHashes)) {
+    try {
+      let absPath = filePath;
+      if (!filePath.startsWith('/')) {
+        let found = false;
+        for (const root of WORKSPACE_ROOTS) {
+          const candidate = resolve(root, filePath);
+          if (existsSync(candidate)) {
+            absPath = candidate;
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          // File doesn't exist — if it was 'new_file' at build time, that's fine
+          if (storedHash !== 'new_file') {
+            driftedFiles.push({ file: filePath, reason: 'file_deleted' });
+          }
+          continue;
+        }
+      }
+
+      if (existsSync(absPath)) {
+        if (storedHash === 'new_file') {
+          // File now exists but was expected to be new — someone created it
+          driftedFiles.push({ file: filePath, reason: 'new_file_already_exists' });
+        } else if (storedHash !== 'unreadable') {
+          const currentContent = readFileSync(absPath, 'utf-8');
+          const currentHash = createHash('md5').update(currentContent).digest('hex');
+          if (currentHash !== storedHash) {
+            driftedFiles.push({ file: filePath, reason: 'content_changed' });
+          }
+        }
+      } else if (storedHash !== 'new_file') {
+        driftedFiles.push({ file: filePath, reason: 'file_deleted' });
+      }
+    } catch {
+      // Can't verify — skip (don't false-positive)
+    }
+  }
+
+  return driftedFiles.length > 0
+    ? { valid: false, driftedFiles }
+    : { valid: true };
+}
+
 export function createBuildApprovalState({
   sliceName, planReference, sliceScope, plannedFiles,
   checklist = { passed: [], na: [] },
   structuredFieldValues = {},
   impactResults = [],
 }) {
+  // Compute content hashes of planned files at approval time.
+  // check_before_edit verifies these on first use — if files changed
+  // between sessions, the approval auto-invalidates (stale-approval gate).
+  const plannedFileHashes = computePlannedFileHashes(plannedFiles);
+
   return {
     timestamp: Date.now(), type: 'build',
     slice_name: sliceName,
     plan_reference: planReference,
     slice_scope: sliceScope,
     planned_files: plannedFiles,
+    planned_file_hashes: plannedFileHashes,
     checklist,
     // Store the declared structured field values so check_before_done can diff
     // what was declared at build time against what was actually delivered.
