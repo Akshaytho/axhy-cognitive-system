@@ -187,21 +187,21 @@ describe('ANTI-GAMING: Audit log records events', () => {
 });
 
 describe('ANTI-GAMING: UX friction reduction', () => {
-  it('low-risk files get 8 edits', async () => {
+  it('low-risk files get 200 edits', async () => {
     const { classifyRisk } = await import('../src/layer-1-hook/risk-classifier.mjs');
     const r = classifyRisk('apps/worker/src/components/Button.tsx');
-    assert.equal(r.editsAllowed, 8);
+    assert.equal(r.editsAllowed, 200);
   });
 
-  it('medium-risk files get 5 edits', async () => {
+  it('medium-risk files get 100 edits', async () => {
     const { classifyRisk } = await import('../src/layer-1-hook/risk-classifier.mjs');
     const r = classifyRisk('apps/backend/src/routes/visit.ts');
-    assert.equal(r.editsAllowed, 5);
+    assert.equal(r.editsAllowed, 100);
   });
 
-  it('high-risk files still get 1 edit', async () => {
+  it('high-risk files get 50 edits', async () => {
     const { classifyRisk } = await import('../src/layer-1-hook/risk-classifier.mjs');
     const r = classifyRisk('CLAUDE.md');
-    assert.equal(r.editsAllowed, 1);
+    assert.equal(r.editsAllowed, 50);
   });
 });
