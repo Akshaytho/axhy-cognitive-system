@@ -35,6 +35,7 @@ const STATE_FILE_PATTERNS = [
   // Matches: export VAR=1, env VAR=1, VAR=1 at command start, or after ; && ||
   { pattern: /(^|;\s*|&&\s*|\|\|\s*|\bexport\s+|\benv\s+)AXHY_AUDIT_EMERGENCY\s*=\s*1/, reason: 'Emergency flag bypass' },
   { pattern: /(^|;\s*|&&\s*|\|\|\s*|\bexport\s+|\benv\s+)AXHY_FOUNDER_APPROVED\s*=\s*1/, reason: 'Founder-approved flag bypass' },
+  { pattern: /(^|;\s*|&&\s*|\|\|\s*|\bexport\s+|\benv\s+)AXHY_BRAIN_DEGRADED_OK\s*=\s*1/, reason: 'Brain degraded-mode bypass' },
 ];
 
 // --- Category 2: Scripting language / shell redirect bypass patterns ---

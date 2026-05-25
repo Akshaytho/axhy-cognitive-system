@@ -10,6 +10,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
 const REPO_HASH = createHash('md5').update(REPO_ROOT).digest('hex').slice(0, 8);
 
+// Tests run without a brain database. The brain unavailability gate blocks
+// check_before_build unless degraded mode is explicitly accepted.
+// Field validation tests need this so they test field logic, not DB availability.
+process.env.AXHY_BRAIN_DEGRADED_OK = '1';
+
 const WORKSPACE_ROOTS = getWorkspaceRoots();
 
 function allHashes() {
@@ -849,6 +854,93 @@ describe('Done-Memo — Enterprise Preflight Reference', async () => {
         && !f.includes('Declaration-vs-delivery')
       );
       assert.equal(buildFailures.length, 0, 'No enterprise preflight failures when build state matches');
+    }
+  });
+});
+
+// ── Brain Unavailability Gate ──────────────────────────────────────────────
+// Tests that brain retrieval failure blocks check_before_build unless
+// AXHY_BRAIN_DEGRADED_OK is explicitly set. Closes the silent degradation
+// asymmetry identified by the 45-year AI principal.
+describe('Brain Unavailability Gate', async () => {
+  const { checkBeforeBuild } = await import(
+    join(__dirname, '..', 'src', 'layer-2-guardrail', 'check-before-build.mjs')
+  );
+
+  beforeEach(() => cleanState());
+  after(() => cleanState());
+
+  it('should BLOCK build when brain is unavailable and AXHY_BRAIN_DEGRADED_OK is NOT set', async () => {
+    // Temporarily remove the degraded flag
+    const saved = process.env.AXHY_BRAIN_DEGRADED_OK;
+    delete process.env.AXHY_BRAIN_DEGRADED_OK;
+
+    try {
+      const result = await checkBeforeBuild({
+        sliceName: 'brain-gate-test',
+        planReference: 'docs/plan.md',
+        sliceScope: 'backend',
+        plannedFiles: ['src/test.ts'],
+        structuredFields: fullPassFields(),
+      });
+
+      // Without DB, brain retrieval fails. Without AXHY_BRAIN_DEGRADED_OK, gate should block.
+      assert.equal(result.allowed, false, 'Should block when brain unavailable without degraded flag');
+      assert.ok(result.brain_error, 'Should include brain_error in response');
+      assert.ok(result.suggestion.includes('AXHY_BRAIN_DEGRADED_OK'),
+        'Suggestion should mention how to accept degraded mode');
+    } finally {
+      // Restore the flag for subsequent tests
+      if (saved !== undefined) {
+        process.env.AXHY_BRAIN_DEGRADED_OK = saved;
+      } else {
+        delete process.env.AXHY_BRAIN_DEGRADED_OK;
+      }
+    }
+  });
+
+  it('should ALLOW build in degraded mode when AXHY_BRAIN_DEGRADED_OK=1 is set', async () => {
+    // AXHY_BRAIN_DEGRADED_OK is already set at file top
+    assert.equal(process.env.AXHY_BRAIN_DEGRADED_OK, '1', 'Env var should be set');
+
+    const result = await checkBeforeBuild({
+      sliceName: 'brain-gate-test-degraded',
+      planReference: 'docs/plan.md',
+      sliceScope: 'backend',
+      plannedFiles: ['src/test.ts'],
+      structuredFields: fullPassFields(),
+    });
+
+    assert.equal(result.allowed, true, 'Should allow in degraded mode');
+    // Verify the response notes degraded mode
+    assert.ok(result.note.includes('DEGRADED MODE'),
+      'Note should mention DEGRADED MODE when brain fails but degraded is accepted');
+    assert.equal(result.brain_retrieval.consulted, false,
+      'brain_retrieval.consulted should be false when brain failed');
+  });
+
+  it('should include brain_error details in the blocked response', async () => {
+    const saved = process.env.AXHY_BRAIN_DEGRADED_OK;
+    delete process.env.AXHY_BRAIN_DEGRADED_OK;
+
+    try {
+      const result = await checkBeforeBuild({
+        sliceName: 'brain-gate-error-detail',
+        planReference: 'docs/plan.md',
+        sliceScope: 'backend',
+        plannedFiles: ['src/test.ts'],
+        structuredFields: fullPassFields(),
+      });
+
+      assert.equal(result.allowed, false);
+      assert.ok(result.reason.includes('locked constraints'),
+        'Reason should explain that locked constraints cannot be verified');
+    } finally {
+      if (saved !== undefined) {
+        process.env.AXHY_BRAIN_DEGRADED_OK = saved;
+      } else {
+        delete process.env.AXHY_BRAIN_DEGRADED_OK;
+      }
     }
   });
 });

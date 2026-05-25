@@ -473,6 +473,23 @@ export async function checkBeforeBuild({
     brainError = `Brain retrieval failed: ${err.message}`;
   }
 
+  // --- Brain unavailability gate ---
+  // If brain retrieval failed and founder hasn't explicitly opted into
+  // degraded mode, block the build. Without this, a Railway cold start or
+  // network glitch silently skips locked constraint checks — the same
+  // asymmetry CHEAT 12 exploited. Unavailability must be a deliberate choice.
+  if (brainError && !process.env.AXHY_BRAIN_DEGRADED_OK) {
+    return {
+      allowed: false,
+      reason: 'Brain retrieval failed — cannot verify locked constraints.',
+      brain_error: brainError,
+      suggestion: 'The brain database is unavailable. Either fix the connection ' +
+        '(check DATABASE_PUBLIC_URL) or set AXHY_BRAIN_DEGRADED_OK=1 to explicitly ' +
+        'accept degraded mode. Silent degradation is not allowed — unavailability ' +
+        'must be a deliberate choice, not a silent pass-through.',
+    };
+  }
+
   // --- All items passed — create build approval state ---
   const state = createBuildApprovalState({
     sliceName,
@@ -524,7 +541,7 @@ export async function checkBeforeBuild({
     note: brainWarnings.length > 0
       ? `Enterprise preflight passed. ${brainWarnings.length} locked constraint(s) found — review before coding. check_before_done will verify these items were addressed.`
       : brainError
-        ? `Enterprise preflight passed. Brain retrieval failed (${brainError}) — proceed with caution, no locked constraints were checked.`
+        ? `Enterprise preflight passed in DEGRADED MODE (AXHY_BRAIN_DEGRADED_OK=1). Brain retrieval failed (${brainError}) — no locked constraints were checked. Founder accepted this risk.`
         : 'Enterprise preflight passed. Brain consulted, no locked constraints conflict. check_before_done will verify these items were addressed.',
   };
 }
