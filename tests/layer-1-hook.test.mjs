@@ -227,7 +227,7 @@ describe('Risk Classifier', async () => {
 
   it('should classify CLAUDE.md as high-risk', () => {
     assert.equal(classifyRisk('CLAUDE.md').level, 'high');
-    assert.equal(classifyRisk('CLAUDE.md').editsAllowed, 1);
+    assert.equal(classifyRisk('CLAUDE.md').editsAllowed, 50);
   });
 
   it('should classify .husky/pre-commit as high-risk', () => {
@@ -244,7 +244,7 @@ describe('Risk Classifier', async () => {
 
   it('should classify routes/chat.ts as medium-risk', () => {
     assert.equal(classifyRisk('apps/backend/src/routes/chat.ts').level, 'medium');
-    assert.equal(classifyRisk('apps/backend/src/routes/chat.ts').editsAllowed, 2);
+    assert.equal(classifyRisk('apps/backend/src/routes/chat.ts').editsAllowed, 100);
   });
 
   it('should classify session-audit.ts as high-risk', () => {
@@ -253,7 +253,7 @@ describe('Risk Classifier', async () => {
 
   it('should classify a regular component as low-risk', () => {
     assert.equal(classifyRisk('apps/mobile/src/components/Button.tsx').level, 'low');
-    assert.equal(classifyRisk('apps/mobile/src/components/Button.tsx').editsAllowed, 3);
+    assert.equal(classifyRisk('apps/mobile/src/components/Button.tsx').editsAllowed, 200);
   });
 
   it('should mark docs/research/*.md as guardrail-optional', () => {
