@@ -917,6 +917,105 @@ describe('State-Freeze Bug Fix', () => {
   });
 });
 
+// ── Answer Submission State-Desync Bug Fix ────────────────────────────────
+// Regression test for the bug where calling check_before_edit with
+// answered_question but without evidence (or without file_paths) would
+// fall through to the main validation path and return the misleading
+// "No file paths provided" error instead of routing to handleAnswerSubmission.
+describe('Answer Submission State-Desync Fix', () => {
+  let checkBeforeEdit, writeGuardrailState, createApprovalState;
+
+  before(async () => {
+    const editMod = await import('../src/layer-2-guardrail/check-before-edit.mjs');
+    checkBeforeEdit = editMod.checkBeforeEdit;
+    const stateMod = await import('../src/layer-2-guardrail/state-tracker.mjs');
+    writeGuardrailState = stateMod.writeGuardrailState;
+    createApprovalState = stateMod.createApprovalState;
+  });
+
+  beforeEach(() => cleanState());
+  after(() => cleanState());
+
+  it('should return evidence error, NOT file_paths error, when answeredQuestion has no evidence', () => {
+    // Set up a state with requires_answer: true (simulating the first call)
+    const state = createApprovalState({
+      intent: 'editing file for valid reason with enough words to pass the intent validation check minimum',
+      approvedFiles: ['src/routes/auth.ts'],
+      editsRemaining: 200,
+      requiresAnswer: true,
+      nextQuestion: 'What is the current content of src/routes/auth.ts?',
+    });
+    writeGuardrailState(state);
+
+    // Retry with answered_question but NO evidence and NO filePaths
+    const result = checkBeforeEdit({
+      answeredQuestion: 'The file contains the auth route handler with JWT validation at line 42',
+      // evidence: deliberately omitted
+      // filePaths: deliberately omitted
+      fileReadStatus: {},
+      testStatus: {},
+    });
+
+    assert.equal(result.allowed, false);
+    // The error should be about evidence, NOT about file paths
+    assert.ok(
+      result.reason.toLowerCase().includes('evidence'),
+      `Expected evidence error, got: "${result.reason}"`
+    );
+    assert.ok(
+      !result.reason.includes('No file paths provided'),
+      'Must NOT return misleading "No file paths provided" error on answer retry'
+    );
+  });
+
+  it('should succeed with answeredQuestion + evidence but WITHOUT filePaths (uses state)', () => {
+    // Set up state with approved_files already set
+    const state = createApprovalState({
+      intent: 'editing auth route for valid reason with enough words to satisfy the thirty word check',
+      approvedFiles: ['src/routes/auth.ts'],
+      editsRemaining: 200,
+      requiresAnswer: true,
+      nextQuestion: 'What is the current content of src/routes/auth.ts?',
+    });
+    writeGuardrailState(state);
+
+    // Retry with answered_question + evidence but NO filePaths
+    const result = checkBeforeEdit({
+      answeredQuestion: 'The file contains the auth route handler with JWT validation at line 42',
+      evidence: ['Read src/routes/auth.ts lines 1-50. JWT validation middleware at line 12.'],
+      // filePaths: deliberately omitted — should use approved_files from state
+      fileReadStatus: {},
+      testStatus: {},
+    });
+
+    assert.equal(result.allowed, true, 'Should approve when evidence is valid');
+    assert.deepEqual(result.approved_files, ['src/routes/auth.ts'],
+      'Should use approved_files from existing state when filePaths not provided');
+  });
+
+  it('should still work normally with answeredQuestion + evidence + filePaths', () => {
+    const state = createApprovalState({
+      intent: 'editing auth route for valid reason with enough words to satisfy the thirty word check',
+      approvedFiles: ['src/routes/auth.ts'],
+      editsRemaining: 200,
+      requiresAnswer: true,
+      nextQuestion: 'What is the current content of src/routes/auth.ts?',
+    });
+    writeGuardrailState(state);
+
+    const result = checkBeforeEdit({
+      answeredQuestion: 'The file contains the auth route handler with JWT validation at line 42',
+      evidence: ['Read src/routes/auth.ts lines 1-50. JWT validation middleware at line 12.'],
+      filePaths: ['src/routes/auth.ts'],
+      fileReadStatus: { 'src/routes/auth.ts': true },
+      testStatus: {},
+    });
+
+    assert.equal(result.allowed, true, 'Should approve with all params provided');
+    assert.deepEqual(result.approved_files, ['src/routes/auth.ts']);
+  });
+});
+
 // ── Build State: Structured Field Values + Impact Results ──────────────────
 // Tests that createBuildApprovalState stores declared field values and brain
 // retrieval results, which check_before_done uses for declaration-vs-delivery diff.

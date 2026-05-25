@@ -26,7 +26,13 @@ export function checkBeforeEdit({
   testStatus = {},
   impactCheckResult = null,
 }) {
-  if (answeredQuestion && evidence) {
+  // Route answer submissions immediately — before intent/filePaths validation.
+  // Previous bug: requiring `&& evidence` here caused fallthrough to the
+  // filePaths check (line 42) when evidence was missing, returning the
+  // misleading "No file paths provided" error on answer retries.
+  // validateAnswer inside handleAnswerSubmission validates evidence separately
+  // and returns a clear "Evidence is required" error if missing.
+  if (answeredQuestion) {
     return handleAnswerSubmission(answeredQuestion, evidence, filePaths);
   }
 
