@@ -5,7 +5,7 @@ import { join, dirname, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-import { getWorkspaceRoots } from '../src/shared/config.mjs';
+import { getWorkspaceRoots, signState } from '../src/shared/config.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
@@ -42,7 +42,8 @@ function cleanAllState() {
 }
 
 function writeState(file, state) {
-  writeFileSync(file, JSON.stringify(state, null, 2));
+  const signed = signState(state);
+  writeFileSync(file, JSON.stringify(signed, null, 2));
 }
 
 function markRead(filePath) {
@@ -183,15 +184,17 @@ describe('AUDIT: Done approval → L1 allows done-memo write', () => {
     assert.equal(r.exitCode, 0, 'Should still be valid at 12 minutes (20min window)');
   });
 
-  it('done approval expires after 20min', () => {
+  it('done approval expires after configured window (2 hours)', () => {
+    // Phase-0 fix: done approval window is 7200000ms (2 hours) — session-wide budget.
+    // Quality enforcement moved to check_before_commit at commit time.
     writeState(DONE_STATE_FILE, {
-      timestamp: Date.now() - 21 * 60 * 1000,
+      timestamp: Date.now() - (2 * 60 * 60 * 1000 + 60000),
       type: 'done',
       approved_files: ['handoff/done-memos/memo.md'],
       edits_remaining: 1,
     });
     const r = runGuard('handoff/done-memos/memo.md');
-    assert.equal(r.exitCode, 2, 'Should expire after 10 minutes');
+    assert.equal(r.exitCode, 2, 'Should expire after 2 hour window');
     assert.match(r.stderr, /expired/);
   });
 });

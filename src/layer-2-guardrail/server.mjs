@@ -209,7 +209,7 @@ export async function handlePlanToolCall(args) {
 
 const DONE_TOOL_DEFINITION = {
   name: 'check_before_done',
-  description: 'Call this BEFORE writing a done memo or declaring any slice/task complete. Runs quality gate (9 check categories, L1-L5 grading), requires typecheck passed, tests passed, and screenshots taken (for UI work). Blocks done-memo writes until grade >= L3 (Senior). Returns fix list for self-iteration until quality passes.',
+  description: 'Pre-commit slice self-audit gate. Call AFTER editing (build → edit → done → commit). Verifies: tests passed, typecheck green, screenshots taken (for UI), handoff updated, coverage notes substantive, self-reasoning summary recorded, enterprise preflight was run. Does NOT check git status (that would deadlock with check_before_commit). Production code quality is then enforced by check_before_commit at commit time.',
   inputSchema: {
     type: 'object',
     properties: {

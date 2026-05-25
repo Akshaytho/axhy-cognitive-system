@@ -6,7 +6,7 @@ import { join, dirname, resolve } from 'node:path';
 
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-import { getWorkspaceRoots } from '../src/shared/config.mjs';
+import { getWorkspaceRoots, signState } from '../src/shared/config.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const GUARD_SCRIPT = join(__dirname, '..', 'src', 'layer-1-hook', 'pre-edit-guard.mjs');
@@ -42,7 +42,11 @@ function writeGuardrailState(overrides = {}) {
     next_question: null,
     ...overrides,
   };
-  writeFileSync(STATE_FILE, JSON.stringify(state));
+  const signed = signState(state);
+  const json = JSON.stringify(signed);
+  for (const h of allHashes()) {
+    try { writeFileSync(`/tmp/axhy-${h}-guardrail-state.json`, json); } catch {}
+  }
   return state;
 }
 

@@ -1,11 +1,16 @@
 #!/usr/bin/env node
 
 import { execFileSync, execSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { randomBytes } from 'node:crypto';
 import { checkPersonaDocChanges } from '../audit/persona-doc-guard.mjs';
 import { findLearningWarnings } from '../audit/learning-validator.mjs';
+import {
+  verifyChallengeResponse,
+  issueChallenge,
+  readExistingChallenge,
+  getResponseFilePath,
+} from '../shared/challenge-response.mjs';
 
 const REPO_ROOT = process.env.AXHY_REPO_ROOT || process.cwd();
 
@@ -47,56 +52,19 @@ async function main() {
       cwd: REPO_ROOT, encoding: 'utf-8',
     }).trim();
     if (lockedMod) {
-      const CHALLENGE_FILE = '/tmp/axhy-founder-challenge.json';
-      const RESPONSE_FILE = '/tmp/axhy-founder-response';
-      const CHALLENGE_EXPIRY_MS = 2 * 60 * 1000; // 2 minutes
-
-      // Check if a valid response already exists (from a previous attempt in this window)
-      let approved = false;
-      if (existsSync(CHALLENGE_FILE) && existsSync(RESPONSE_FILE)) {
-        try {
-          const challenge = JSON.parse(readFileSync(CHALLENGE_FILE, 'utf-8'));
-          const response = readFileSync(RESPONSE_FILE, 'utf-8').trim();
-          const elapsed = Date.now() - (challenge.timestamp || 0);
-          if (elapsed < CHALLENGE_EXPIRY_MS && response === challenge.token) {
-            approved = true;
-            // Clean up after successful verification
-            try { unlinkSync(CHALLENGE_FILE); } catch {}
-            try { unlinkSync(RESPONSE_FILE); } catch {}
-          }
-        } catch {}
-      }
-
-      if (!approved) {
-        // Phase-0 fix: reuse unexpired challenge token instead of generating
-        // a fresh one every commit attempt. Previously each `git commit` overwrote
-        // the challenge with a new token, making the founder's response stale
-        // before they could re-commit (5+ failed cycles observed in Cluster A session).
-        let token = null;
-        if (existsSync(CHALLENGE_FILE)) {
-          try {
-            const existing = JSON.parse(readFileSync(CHALLENGE_FILE, 'utf-8'));
-            const age = Date.now() - (existing.timestamp || 0);
-            if (age < CHALLENGE_EXPIRY_MS && existing.token) {
-              token = existing.token; // reuse — founder may have already written this
-            }
-          } catch {} // corrupt file → generate fresh below
-        }
-
-        if (!token) {
-          token = randomBytes(3).toString('hex').toUpperCase(); // 6-char hex
-          writeFileSync(CHALLENGE_FILE, JSON.stringify({
-            token,
-            timestamp: Date.now(),
-            files: lockedMod.split('\n'),
-          }));
-        }
+      const result = verifyChallengeResponse('locked_docs');
+      if (!result.verified) {
+        // Reuse unexpired challenge token instead of generating a fresh one
+        // every commit attempt (Phase-0 fix for stale-token cycle).
+        const existing = readExistingChallenge('locked_docs');
+        const token = existing || issueChallenge('locked_docs', lockedMod.split('\n'));
+        const responseFile = getResponseFilePath();
 
         log('locked', 'BLOCKED: Changes to docs/locked/ require founder approval.');
         log('locked', `Files: ${lockedMod}`);
         log('locked', '');
         log('locked', '  To approve, run this in your terminal within 2 minutes:');
-        log('locked', `    echo ${token} > /tmp/axhy-founder-response`);
+        log('locked', `    echo ${token} > ${responseFile}`);
         log('locked', '');
         log('locked', '  Then re-run: git commit ...');
         fail('');

@@ -54,7 +54,16 @@ export function checkBeforeEdit({
   }
 
   const primaryFile = filePaths[0];
-  const risk = classifyRisk(primaryFile);
+
+  // Compute highest risk across ALL files — not just the first one.
+  // A multi-file edit putting a low-risk file first must not bypass
+  // HIGH risk gates (evidence requirements, edit budgets, build preflight).
+  const risk = filePaths.reduce((worst, fp) => {
+    const r = classifyRisk(fp);
+    if (r.level === 'high') return r;
+    if (r.level === 'medium' && worst.level !== 'high') return r;
+    return worst;
+  }, classifyRisk(primaryFile));
 
   // Validate structured reasoning evidence for medium/high risk files.
   // H1 fix (2026-05-23): reasoning_evidence is REQUIRED for high/medium risk.

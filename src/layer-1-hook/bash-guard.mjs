@@ -215,7 +215,9 @@ async function main() {
     for await (const chunk of process.stdin) chunks.push(chunk);
     input = JSON.parse(Buffer.concat(chunks).toString());
   } catch {
-    process.exit(0);
+    // Fail-closed: if stdin is corrupted or unparseable, BLOCK the command.
+    // Exit 0 here would silently allow any bash command through.
+    process.exit(2);
     return;
   }
 

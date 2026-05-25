@@ -6,7 +6,13 @@ import { join, dirname, resolve } from 'node:path';
 
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-import { getWorkspaceRoots } from '../src/shared/config.mjs';
+import { getWorkspaceRoots, getBudgets, getTimeouts, signState } from '../src/shared/config.mjs';
+
+// Phase-0 budget values (session-wide budgets, enforced by check_before_commit at commit time):
+//   high_risk_edits: 50, medium_risk_edits: 100, low_risk_edits: 200
+//   approval_window_ms: 7200000 (2 hours)
+// These replaced per-edit tight budgets (1/5/8) when check_before_commit became mandatory.
+const BUDGETS = getBudgets();
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const GUARD_SCRIPT = join(__dirname, '..', 'src', 'layer-1-hook', 'pre-edit-guard.mjs');
@@ -90,19 +96,20 @@ describe('Integration: Layer 2 approval → Layer 1 enforcement', async () => {
       testStatus: { 'apps/mobile/src/components/Button.tsx': true },
     });
     assert.equal(approval.allowed, true);
-    assert.equal(approval.edits_remaining, 8);
+    assert.equal(approval.edits_remaining, BUDGETS.low_risk_edits);
 
     // Step 2: Simulate file read (Layer 1 checks this)
     markFileRead('apps/mobile/src/components/Button.tsx');
 
-    // Step 3-10: All 8 edits should succeed, then 9th blocks
-    for (let i = 0; i < 8; i++) {
-      const r = runGuard('apps/mobile/src/components/Button.tsx');
-      assert.equal(r.exitCode, 0, `Edit ${i + 1}/8 should succeed`);
-      const state = JSON.parse(readFileSync(STATE_FILE, 'utf-8'));
-      assert.equal(state.edits_remaining, 8 - (i + 1));
-    }
+    // Verify first edit succeeds and decrements
+    const r = runGuard('apps/mobile/src/components/Button.tsx');
+    assert.equal(r.exitCode, 0, 'First edit should succeed');
+    const state = JSON.parse(readFileSync(STATE_FILE, 'utf-8'));
+    assert.equal(state.edits_remaining, BUDGETS.low_risk_edits - 1);
 
+    // Exhaust remaining budget by writing state with 0 edits, then verify block
+    const exhausted = signState({ ...state, edits_remaining: 0 });
+    writeFileSync(STATE_FILE, JSON.stringify(exhausted));
     const rBlocked = runGuard('apps/mobile/src/components/Button.tsx');
     assert.equal(rBlocked.exitCode, 2);
     assert.match(rBlocked.stderr, /Edit limit reached/);
@@ -119,7 +126,7 @@ describe('Integration: Layer 2 approval → Layer 1 enforcement', async () => {
     });
     assert.equal(approval.allowed, false);
     assert.equal(approval.requires_answer, true);
-    assert.equal(approval.edits_remaining, 1);
+    assert.equal(approval.edits_remaining, BUDGETS.high_risk_edits);
 
     // Step 2: Layer 1 should block because requires_answer=true
     markFileRead('CLAUDE.md');
@@ -140,7 +147,10 @@ describe('Integration: Layer 2 approval → Layer 1 enforcement', async () => {
     const r2 = runGuard('CLAUDE.md');
     assert.equal(r2.exitCode, 0);
 
-    // Step 5: High-risk = 1 edit, so next should be blocked
+    // Step 5: Exhaust budget, then verify block
+    const state = JSON.parse(readFileSync(STATE_FILE, 'utf-8'));
+    const exhausted = signState({ ...state, edits_remaining: 0 });
+    writeFileSync(STATE_FILE, JSON.stringify(exhausted));
     const r3 = runGuard('CLAUDE.md');
     assert.equal(r3.exitCode, 2);
     assert.match(r3.stderr, /Edit limit reached/);
@@ -177,17 +187,27 @@ describe('Integration: Layer 2 approval → Layer 1 enforcement', async () => {
   });
 
   it('Flow 6: L2 approves → but file not read → L1 blocks', () => {
-    checkBeforeEdit({
-      intent: VALID_INTENT,
-      filePaths: ['apps/mobile/src/components/Button.tsx'],
-      fileReadStatus: { 'apps/mobile/src/components/Button.tsx': true },
-      testStatus: { 'apps/mobile/src/components/Button.tsx': true },
-    });
+    // File must exist on disk for read-check to run (non-existent files skip it by design)
+    const testFile = join(REPO_ROOT, 'apps/mobile/src/components/Button.tsx');
+    const testDir = dirname(testFile);
+    execFileSync('mkdir', ['-p', testDir]);
+    writeFileSync(testFile, '// test file for read-check');
 
-    // Don't mark file as read — Layer 1 should block
-    const result = runGuard('apps/mobile/src/components/Button.tsx');
-    assert.equal(result.exitCode, 2);
-    assert.match(result.stderr, /haven't Read this file/);
+    try {
+      checkBeforeEdit({
+        intent: VALID_INTENT,
+        filePaths: ['apps/mobile/src/components/Button.tsx'],
+        fileReadStatus: { 'apps/mobile/src/components/Button.tsx': true },
+        testStatus: { 'apps/mobile/src/components/Button.tsx': true },
+      });
+
+      // Don't mark file as read — Layer 1 should block
+      const result = runGuard('apps/mobile/src/components/Button.tsx');
+      assert.equal(result.exitCode, 2);
+      assert.match(result.stderr, /haven't Read this file/);
+    } finally {
+      try { unlinkSync(testFile); } catch {}
+    }
   });
 
   it('Flow 7: L2 hard blocks → state not written → L1 blocks', () => {
@@ -254,10 +274,10 @@ describe('Integration: Full risk classification → approval → enforcement cha
   beforeEach(() => cleanState());
   after(() => cleanState());
 
-  it('high-risk file → 1 edit allowed → blocks after 1', () => {
+  it('high-risk file → budget edits allowed → blocks after exhaustion', () => {
     const risk = classifyRisk('CLAUDE.md');
     assert.equal(risk.level, 'high');
-    assert.equal(risk.editsAllowed, 1);
+    assert.equal(risk.editsAllowed, BUDGETS.high_risk_edits);
 
     // Need to answer question first for high-risk
     checkBeforeEdit({
@@ -278,14 +298,18 @@ describe('Integration: Full risk classification → approval → enforcement cha
     const r1 = runGuard('CLAUDE.md');
     assert.equal(r1.exitCode, 0);
 
+    // Exhaust budget by writing state with 0 edits remaining
+    const state = JSON.parse(readFileSync(STATE_FILE, 'utf-8'));
+    const exhausted = signState({ ...state, edits_remaining: 0 });
+    writeFileSync(STATE_FILE, JSON.stringify(exhausted));
     const r2 = runGuard('CLAUDE.md');
     assert.equal(r2.exitCode, 2);
   });
 
-  it('medium-risk file → 5 edits allowed → blocks after 5', () => {
+  it('medium-risk file → budget edits allowed → blocks after exhaustion', () => {
     const risk = classifyRisk('apps/backend/src/routes/chat.ts');
     assert.equal(risk.level, 'medium');
-    assert.equal(risk.editsAllowed, 5);
+    assert.equal(risk.editsAllowed, BUDGETS.medium_risk_edits);
 
     checkBeforeEdit({
       intent: VALID_INTENT,
@@ -296,12 +320,14 @@ describe('Integration: Full risk classification → approval → enforcement cha
     });
 
     markFileRead('apps/backend/src/routes/chat.ts');
-    for (let i = 0; i < 5; i++) {
-      const r = runGuard('apps/backend/src/routes/chat.ts');
-      assert.equal(r.exitCode, 0, `Edit ${i + 1}/5 should succeed`);
-    }
+    const r1 = runGuard('apps/backend/src/routes/chat.ts');
+    assert.equal(r1.exitCode, 0, 'First edit should succeed');
 
+    // Exhaust budget by writing state with 0 edits remaining
+    const state = JSON.parse(readFileSync(STATE_FILE, 'utf-8'));
+    const exhausted = signState({ ...state, edits_remaining: 0 });
+    writeFileSync(STATE_FILE, JSON.stringify(exhausted));
     const rBlocked = runGuard('apps/backend/src/routes/chat.ts');
-    assert.equal(rBlocked.exitCode, 2, 'Edit 6 should be blocked');
+    assert.equal(rBlocked.exitCode, 2, 'Should block when budget exhausted');
   });
 });

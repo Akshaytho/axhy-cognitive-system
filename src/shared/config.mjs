@@ -11,7 +11,7 @@
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createHash, createHmac } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -182,7 +182,10 @@ export function verifyState(state) {
   const { _sig, ...payload } = state;
   const json = JSON.stringify(payload, Object.keys(payload).sort());
   const expected = createHmac('sha256', getHmacSecret()).update(json).digest('hex');
-  return _sig === expected;
+  const sigBuf = Buffer.from(_sig, 'hex');
+  const expectedBuf = Buffer.from(expected, 'hex');
+  if (sigBuf.length !== expectedBuf.length) return false;
+  return timingSafeEqual(sigBuf, expectedBuf);
 }
 
 /**

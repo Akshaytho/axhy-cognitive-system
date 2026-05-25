@@ -1,13 +1,15 @@
 /**
- * check_before_done — narrowed to integrity verification after commit.
+ * check_before_done — pre-commit slice self-audit gate.
  *
- * Production code-quality scanning moved to `check_before_commit` (which
+ * Called BEFORE commit (after editing, before check_before_commit).
+ * Correct workflow: build → edit → done → commit.
+ *
+ * Production code-quality scanning lives in `check_before_commit` (which
  * runs ONCE on the whole slice via pattern/dependency/surface passes).
  * Iterating quality scans here caused the 7-call spiral that cost the
  * other session their token budget.
  *
- * This gate now only verifies that the slice is properly closed out:
- *   - commit landed (no uncommitted slice files)
+ * This gate verifies the slice is ready to commit:
  *   - tests passed
  *   - handoff/STATUS.md updated
  *   - coverage notes substantive
@@ -15,12 +17,12 @@
  *   - enterprise preflight (check_before_build) was run for this slice
  *   - screenshots taken if UI files in slice
  *
- * Quality before commit; reflection/integrity after commit.
+ * Self-audit before commit; quality scanning at commit time.
  */
 
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { execSync } from 'node:child_process';
-import { resolve, extname } from 'node:path';
+import { resolve } from 'node:path';
 import {
   writeDoneGuardrailState,
   createDoneApprovalState,
@@ -28,25 +30,6 @@ import {
 } from './state-tracker.mjs';
 
 const AXHY_V3_ROOT = process.env.AXHY_V3_ROOT || (process.env.HOME + '/eclean_workspace/axhy-v3');
-
-function checkFilesCommitted(sliceFiles) {
-  try {
-    const args = sliceFiles.map(f => {
-      const full = f.startsWith('/') ? f : resolve(AXHY_V3_ROOT, f);
-      return `"${full}"`;
-    }).join(' ');
-    const result = execSync(
-      `git -C "${AXHY_V3_ROOT}" status --porcelain -- ${args}`,
-      { encoding: 'utf-8', timeout: 10000 }
-    ).trim();
-    if (result.length > 0) {
-      return { allCommitted: false, uncommitted: result.split('\n').map(l => l.trim()) };
-    }
-    return { allCommitted: true, uncommitted: [] };
-  } catch {
-    return { allCommitted: true, uncommitted: [], skipped: true };
-  }
-}
 
 const UI_EXTENSIONS = ['.tsx', '.jsx'];
 const FRONTEND_PATH_MARKERS = ['apps/worker', 'apps/supervisor', 'apps/admin', 'components/', 'screens/', 'pages/'];
@@ -302,16 +285,6 @@ export async function checkBeforeDone({
     );
   }
 
-  // Git commit check — programmatic, can't be faked
-  const gitStatus = checkFilesCommitted(sliceFiles);
-  if (!gitStatus.allCommitted) {
-    preflightFailures.push(
-      'Uncommitted slice files detected. Commit all work to git before declaring done. ' +
-      'Uncommitted code is not shipped code.\n' +
-      gitStatus.uncommitted.map(f => '  ' + f).join('\n')
-    );
-  }
-
   if (!selfReasoningSummary || selfReasoningSummary.trim().length < 20) {
     preflightFailures.push(
       'Missing self-reasoning summary (20+ chars). Before non-trivial work, you must run ' +
@@ -363,7 +336,7 @@ export async function checkBeforeDone({
       allowed: false,
       reason: 'Integrity preflight failed.',
       preflight_failures: preflightFailures,
-      suggestion: 'Complete all preflight items, then re-call check_before_done. Production code quality is verified by check_before_commit BEFORE commit — this gate only verifies that the slice is properly closed out.',
+      suggestion: 'Complete all preflight items, then re-call check_before_done. This is a pre-commit self-audit gate (workflow: build → edit → done → commit). Production code quality is verified by check_before_commit at commit time.',
     };
   }
 
@@ -392,6 +365,6 @@ export async function checkBeforeDone({
     edits_remaining: 1,
     expires: '10 minutes',
     summary: `${sliceName}: integrity verified. Done memo write approved.`,
-    note: 'check_before_done now verifies handoff/commit/test/coverage integrity only. Production code quality is enforced by check_before_commit (run ONCE on the slice diff). No more iteration spirals here.',
+    note: 'check_before_done is a pre-commit self-audit gate (workflow: build → edit → done → commit). It verifies tests/handoff/coverage/enterprise-preflight integrity. Production code quality is then enforced by check_before_commit at commit time.',
   };
 }

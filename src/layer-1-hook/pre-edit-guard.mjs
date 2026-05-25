@@ -31,14 +31,12 @@ const DONE_APPROVAL_WINDOW_MS = _timeouts.done_approval_window_ms;
 
 /**
  * Read state from any hash bucket with HMAC verification (C1 fix).
- * Rejects forged or tampered state files. Falls back to unsigned
- * state only if no signed state is available (migration grace).
+ * Rejects forged, tampered, and unsigned state files.
+ * All writers now sign via signState() — unsigned fallback removed.
  */
 function readFromAnyVerified(suffix) {
   let best = null;
   let bestTs = -1;
-  let bestUnsigned = null;
-  let bestUnsignedTs = -1;
 
   for (const h of allHashes()) {
     const candidate = `/tmp/axhy-${h}-${suffix}`;
@@ -47,17 +45,13 @@ function readFromAnyVerified(suffix) {
       const parsed = JSON.parse(readFileSync(candidate, 'utf-8'));
       const ts = parsed && typeof parsed.timestamp === 'number' ? parsed.timestamp : 0;
       if (verifyState(parsed)) {
-        // Valid signed state
         if (ts > bestTs) { best = parsed; bestTs = ts; }
-      } else if (!parsed._sig) {
-        // Unsigned (pre-migration) — accept with lower priority
-        if (ts > bestUnsignedTs) { bestUnsigned = parsed; bestUnsignedTs = ts; }
+      } else {
+        process.stderr.write(`[axhy] WARNING: unsigned/invalid state file ignored: ${candidate}\n`);
       }
-      // If _sig exists but verification fails → forged, skip silently
     } catch {}
   }
-  // Prefer signed state; fall back to unsigned during migration
-  return best || bestUnsigned;
+  return best;
 }
 
 /**
