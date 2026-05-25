@@ -1,7 +1,7 @@
 # BOOT DIGEST
 
 Universal operating rules for every Axhy session. Read this once at boot.
-The full 19 feedback files and 3309-line master plan are now embedded in the brain — `impactCheck("plain English description of task")` surfaces what's relevant when a task touches it. Do not preload everything.
+The full 27 feedback/memory files and 3309-line master plan are now embedded in the brain — `impactCheck("plain English description of task")` surfaces what's relevant when a task touches it. Do not preload everything.
 
 ## Identity (loaded from CORE_MIND.md — do not duplicate here)
 
@@ -79,4 +79,4 @@ Otherwise, this digest is enough.
 
 ---
 
-*Last refreshed: 2026-05-23. If feedback files change, regenerate this digest by skimming the new `## name:` headlines and updating the rule lines above. The brain handles semantic search; this file handles boot-time orientation.*
+*Last refreshed: 2026-05-25. If feedback files change, regenerate this digest by skimming the new `## name:` headlines and updating the rule lines above. The brain handles semantic search; this file handles boot-time orientation.*

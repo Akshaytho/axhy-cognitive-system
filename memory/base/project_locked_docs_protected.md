@@ -1,10 +1,10 @@
 ---
 name: docs/locked/ folder is protected — never delete or modify
-description: Any file under /Users/thotaakshay/eclean_workspace/docs/locked/ must not be deleted or modified by Claude without Akshay's explicit in-turn permission
+description: Any file under /Users/thotaakshay/eclean_workspace/axhy-cognitive-system/docs/locked/ must not be deleted or modified by Claude without Akshay's explicit in-turn permission
 type: project
 originSessionId: 23ff8633-8261-4b35-8d00-54991ea03ee2
 ---
-The folder `/Users/thotaakshay/eclean_workspace/docs/locked/` holds strategic roadmap documents that must persist across sessions and survive AI context resets. These files are reference material that Akshay has explicitly asked future-Claude to read when specific triggers fire.
+The folder `/Users/thotaakshay/eclean_workspace/axhy-cognitive-system/docs/locked/` holds strategic roadmap documents that must persist across sessions and survive AI context resets. These files are reference material that Akshay has explicitly asked future-Claude to read when specific triggers fire.
 
 **Rules:**
 1. **Never delete** any file under `docs/locked/` — not during cleanup, not during refactors, not when consolidating docs.

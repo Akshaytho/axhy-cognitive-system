@@ -5,13 +5,13 @@
     "/Users/thotaakshay/eclean_workspace/axhy-cognitive-system"
   ],
   "timeouts": {
-    "approval_window_ms": 7200000,
-    "done_approval_window_ms": 7200000,
+    "approval_window_ms": 300000,
+    "done_approval_window_ms": 300000,
     "read_window_ms": 600000
   },
   "budgets": {
-    "high_risk_edits": 50,
-    "medium_risk_edits": 100,
-    "low_risk_edits": 200
+    "high_risk_edits": 1,
+    "medium_risk_edits": 2,
+    "low_risk_edits": 3
   }
 }

@@ -76,8 +76,8 @@ export function checkBeforeEdit({
   }
   const maturity = suggestMaturity({ filePath: primaryFile, changeType, intent });
 
-  const fileWasRead = fileReadStatus[primaryFile] !== false;
-  const testsExist = testStatus[primaryFile] !== false;
+  const fileWasRead = fileReadStatus[primaryFile] === true;
+  const testsExist = testStatus[primaryFile] === true;
 
   const hardBlocks = impactCheckResult?.hardBlocks || [];
   const warnings = impactCheckResult?.warnings || [];

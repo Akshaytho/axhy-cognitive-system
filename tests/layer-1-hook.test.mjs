@@ -119,19 +119,21 @@ describe('Layer 1: PreToolUse Hook (pre-edit-guard)', () => {
 
   describe('Read-before-edit enforcement', () => {
     it('should BLOCK edit when file was not read recently', () => {
-      writeGuardrailState({ approved_files: ['routes/chat.ts'] });
+      // Use a file that actually exists on disk — the read-check is
+      // intentionally skipped for non-existent files (new file creation).
+      writeGuardrailState({ approved_files: ['bash-guard.mjs'] });
       // Don't mark file as read
-      const result = runGuard({ file_path: 'apps/backend/src/routes/chat.ts' });
+      const result = runGuard({ file_path: 'src/layer-1-hook/bash-guard.mjs' });
       assert.equal(result.exitCode, 2);
       assert.match(result.stderr, /haven't Read this file/);
     });
 
     it('should BLOCK edit when file read was too long ago', () => {
-      writeGuardrailState({ approved_files: ['routes/chat.ts'] });
+      writeGuardrailState({ approved_files: ['bash-guard.mjs'] });
       // Write read state 15 minutes ago (beyond 10-min window)
-      const reads = { 'apps/backend/src/routes/chat.ts': Date.now() - 15 * 60 * 1000 };
+      const reads = { 'src/layer-1-hook/bash-guard.mjs': Date.now() - 15 * 60 * 1000 };
       writeFileSync(READ_STATE_FILE, JSON.stringify(reads));
-      const result = runGuard({ file_path: 'apps/backend/src/routes/chat.ts' });
+      const result = runGuard({ file_path: 'src/layer-1-hook/bash-guard.mjs' });
       assert.equal(result.exitCode, 2);
       assert.match(result.stderr, /haven't Read this file/);
     });
@@ -225,7 +227,7 @@ describe('Risk Classifier', async () => {
 
   it('should classify CLAUDE.md as high-risk', () => {
     assert.equal(classifyRisk('CLAUDE.md').level, 'high');
-    assert.equal(classifyRisk('CLAUDE.md').editsAllowed, 50);
+    assert.equal(classifyRisk('CLAUDE.md').editsAllowed, 1);
   });
 
   it('should classify .husky/pre-commit as high-risk', () => {
@@ -242,7 +244,7 @@ describe('Risk Classifier', async () => {
 
   it('should classify routes/chat.ts as medium-risk', () => {
     assert.equal(classifyRisk('apps/backend/src/routes/chat.ts').level, 'medium');
-    assert.equal(classifyRisk('apps/backend/src/routes/chat.ts').editsAllowed, 100);
+    assert.equal(classifyRisk('apps/backend/src/routes/chat.ts').editsAllowed, 2);
   });
 
   it('should classify session-audit.ts as high-risk', () => {
@@ -251,7 +253,7 @@ describe('Risk Classifier', async () => {
 
   it('should classify a regular component as low-risk', () => {
     assert.equal(classifyRisk('apps/mobile/src/components/Button.tsx').level, 'low');
-    assert.equal(classifyRisk('apps/mobile/src/components/Button.tsx').editsAllowed, 200);
+    assert.equal(classifyRisk('apps/mobile/src/components/Button.tsx').editsAllowed, 3);
   });
 
   it('should mark docs/research/*.md as guardrail-optional', () => {
