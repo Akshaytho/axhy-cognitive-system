@@ -183,11 +183,139 @@ Audited 6 capture screen files against brain-surfaced rules:
 
 **Session B: CLEAN PASS**
 
+### Founder Notes
+
+Stronger than Session A — retrieval worked immediately without any mid-session fix needed. Proves the lighter boot does not make Axhy weaker in mobile/worker context. The brain still retrieved worker UX rules, tap-target requirements, wake-lock safety, visual verification requirements, known CRITs, and enterprise mobile expectations.
+
+Pre-existing product findings (NOT Book Architecture regressions — backlogged for separate fix):
+- `timer.tsx` back button missing explicit 48pt minHeight
+- `submit.tsx` back button missing explicit 48pt minHeight
+- `review.tsx` wake-lock gap on FinalReviewScreen
+
 ---
 
 ## Session C: Documentation / Planning
 
-**Status:** Pending
+**Task:** Audit whether the current master plan/digest correctly represents the open questions for Iterations 5-7, without re-debating locked decisions.
+
+### Pre-Session Checklist
+
+**What this validates:**
+The lighter boot trusts digest + impactCheck instead of preloading the full master plan. Session C tests whether that hierarchy works for planning/documentation tasks — the kind of work that most needs the full master plan and where treating the digest as authority would be most dangerous.
+
+**Expected workflow:**
+1. Read digest (already in boot) — extract high-level iteration 5-7 status
+2. Run impactCheck for open questions — brain should surface relevant §H content
+3. Only open full master plan if impactCheck + digest disagree or lack detail
+4. Never re-debate locked decisions (iterations 1-4)
+
+**Expected impactCheck queries:**
+1. `iteration 5 supervisor open questions` — should surface supervisor-specific open questions from §H
+2. `iteration 6 per-user living docs open questions` — should surface living doc design questions
+3. `iteration 7 AI conversational onboarding open questions` — should surface AI onboarding design questions
+4. `locked iteration 1 tenant model identity` — should surface the locked decision, NOT re-open debate
+
+**Expected locked docs the brain must surface:**
+- Iteration lock status (locked vs partial)
+- Hard rules from §E (especially AI architecture constraints for iteration 7)
+- Source-of-truth hierarchy: digest = navigation, full plan = authority
+
+**Expected guardrails:**
+- impactCheck returns `_embedding_mode: "real"` on all queries
+- Digest frontmatter correctly states `authority_level: digest` and `promote_to_locked: false`
+- No need to edit any file — this is a read-only audit
+
+**Pass criteria:**
+- Brain surfaces iteration 5-7 open questions without needing to read the full 60K master plan
+- Locked iterations (1-4) are recognized as locked — no re-debate triggered
+- Digest is treated as navigation (not authority) — verified by checking frontmatter
+- Source-of-truth hierarchy is maintained: digest < impactCheck < full master plan
+- `_embedding_mode: "real"` on all queries
+
+**Failure signs (critical regression):**
+- Claude treats digest content as authoritative (makes a decision based solely on digest)
+- Claude re-debates a locked iteration (e.g., changes tenant model)
+- Brain fails to surface open questions for iterations 5-7
+- Claude opens the full 60K master plan when impactCheck would have sufficed
+- `_embedding_mode: "fake"` on any query
+
+**Failure signs (minor regression):**
+- Brain surfaces some but not all open questions for a given iteration
+- impactCheck returns relevant but imprecise results requiring one full-plan lookup for confirmation
+
+### Execution Results
+
+**Query 1 — iteration 5 supervisor open questions (scores 0.57-0.62):**
+| Result | Score | What it surfaced |
+|--------|-------|-----------------|
+| Iteration Locks table (from digest) | 0.62 | Iterations 1-4 LOCKED, 5-7 PARTIAL, ~22 open questions |
+| Open Questions & Deferred Decisions | 0.60 | 8 specific replacement-invite open questions (5 OPEN, 2 CLOSED, 1 DEFERRED) |
+| Wave 2 decisions queue spec | 0.58 | Supervisor decisions queue implementation detail |
+| Locks summary | 0.58 | Lock status across all iterations |
+| Pending founder ack questions | 0.57 | Supervisor Q1-Q13 with panel picks and affected areas |
+| Resolved locked picks (§9) | 0.57 | 9 founder picks already locked on 2026-05-14 |
+
+**Query 2 — iteration 6 per-user living docs (scores 0.49-0.52):**
+| Result | Score | What it surfaced |
+|--------|-------|-----------------|
+| LivingDoc 5 Sections (locked) | 0.52 | siteRules, workerNotes, clientPreferences, qualityStandards, operationalNotes |
+| Adversarial panel checkpoint | 0.52 | Phase 2 wiring review for chat/LivingDoc |
+| AI chat + LivingDoc spec (Phase C) | 0.50 | Draft spec for LivingDoc + assignment hydrator |
+| Persona-based doc organization | 0.50 | Claude loads persona docs per session based on intent |
+
+**Query 3 — iteration 7 AI onboarding (scores 0.50-0.57):**
+| Result | Score | What it surfaced |
+|--------|-------|-----------------|
+| AI behavior rules | 0.57 | No AI recommending people, quiet by default, no auto-applying changes |
+| AI thin-boundary | 0.53 | AI only at user-input boundary, never inside cascades |
+| Open questions pending founder ack | 0.51 | Q1-Q13 table with panel picks |
+| Chat Behavior Rules (locked) | 0.50 | What Product AI IS and IS NOT |
+| What Product AI IS (locked) | 0.50 | Supervisor assistant, multi-language, structured decisions |
+| What Product AI IS NOT (locked) | 0.50 | Not chatbot, not search engine, not authority |
+
+**Query 4 — locked iteration 1 tenant model (scores 0.48-0.54):**
+| Result | Score | What it surfaced |
+|--------|-------|-----------------|
+| E2 Tenant and Resource Ownership (locked) | 0.54 | Every query filters by companyId |
+| Tenancy + identity spec (§4.1) | 0.53 | Entity ownership table, key fields |
+| Tenant boundary (§9.1) | 0.53 | withTenantContext wrapper, JWT carries companyId |
+| Iteration Locks table | 0.51 | "1 | Tenant model and user identity | LOCKED" |
+| D5 TENANT ISOLATION NON-NEGOTIABLE (locked) | 0.50 | Every DB read/write through withTenantContext |
+
+All queries: `_embedding_mode: "real"`.
+
+### Source-of-Truth Hierarchy Audit
+
+| Check | Result |
+|-------|--------|
+| Digest treated as navigation, not authority | PASS — frontmatter says `authority_level: digest`, `promote_to_locked: false` |
+| impactCheck used before full master plan | PASS — all 4 queries answered without opening the 60K plan |
+| Locked decisions not re-debated | PASS — iteration 1 recognized as LOCKED, no changes proposed |
+| Open questions recognized as OPEN | PASS — brain surfaced Q1-Q13 with "pending founder ack" status |
+| Full master plan NOT opened unnecessarily | PASS — impactCheck provided sufficient detail for the audit |
+
+### Notable Finding
+
+The brain surfaced open questions from **multiple spec/handoff docs** (SUPERVISOR_CONTEXT.md, replacement-invite-feature-spec.md) rather than directly from master plan §H. The content is consistent across sources, but the authority chain flows through derived specs rather than the canonical §H section. This is acceptable for navigation but means that if a discrepancy existed between §H and a derived spec, the brain alone might not catch it. For high-stakes planning decisions, a single targeted §H lookup would resolve this.
+
+### Checklist Evaluation
+
+| Criterion | Result |
+|-----------|--------|
+| Brain surfaces iteration 5-7 open questions | PASS — Q1-Q13 supervisor, 8 replacement-invite, LivingDoc structure, AI behavior |
+| Locked iterations recognized as locked | PASS — iteration 1 shows LOCKED, locked docs surfaced with locked authority |
+| Digest treated as navigation | PASS — frontmatter verified |
+| Source-of-truth hierarchy maintained | PASS — no authority claims from digest, no full-plan opened |
+| `_embedding_mode: "real"` on all queries | PASS |
+| No re-debating locked decisions | PASS |
+| No unnecessary full master plan reads | PASS |
+
+**Critical regressions:** None.
+**Minor regressions:** None.
+
+### Verdict
+
+**Session C: CLEAN PASS**
 
 ---
 
