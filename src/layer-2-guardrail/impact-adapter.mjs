@@ -11,6 +11,7 @@ let v2Timeline = null;
 let v2Get = null;
 let v2ActivitySearch = null;
 let v2IsEnabled = null;
+let v2EmbeddingMode = null;
 
 const BRAIN_LOCK = '/tmp/axhy-brain-rebuilding.lock';
 const LOCK_STALE_MS = 10 * 60 * 1000;
@@ -38,6 +39,7 @@ export async function loadRealImpactCheck() {
     v2Get = v2Mod.get;
     v2ActivitySearch = v2Mod.activitySearch;
     v2IsEnabled = v2Mod.isV2Enabled;
+    v2EmbeddingMode = v2Mod.embeddingMode;
   } catch {
     // v2 not available — will use v1
   }
@@ -69,6 +71,7 @@ export async function impactCheck(changeDescription, persona, riskLevel = 'low')
     try {
       const result = await v2ImpactCheck(changeDescription);
       result._version = 'v2';
+      if (v2EmbeddingMode) result._embedding_mode = v2EmbeddingMode();
       return result;
     } catch (err) {
       // Fall through to v1
@@ -80,6 +83,7 @@ export async function impactCheck(changeDescription, persona, riskLevel = 'low')
     try {
       const result = await realImpactCheck(changeDescription, persona);
       result._version = 'v1';
+      if (v2EmbeddingMode) result._embedding_mode = v2EmbeddingMode();
       return result;
     } catch (err) {
       return fallbackResult(`impactCheck DB error: ${err.message}`, riskLevel);
@@ -128,9 +132,11 @@ export async function impactSearch(args) {
     // B2: Token economics — teach the AI about retrieval cost
     const economics = estimateTokenEconomics(results);
     if (economics) response.token_economics = economics;
+    // Embedding mode visibility — Claude can verify real vs fake
+    if (v2EmbeddingMode) response._embedding_mode = v2EmbeddingMode();
     return response;
   } catch (err) {
-    return { error: err.message, results: [] };
+    return { error: err.message, results: [], _embedding_mode: v2EmbeddingMode ? v2EmbeddingMode() : 'unknown' };
   }
 }
 
