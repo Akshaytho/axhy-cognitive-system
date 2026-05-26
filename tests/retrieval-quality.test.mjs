@@ -233,6 +233,43 @@ describe('Phase 0: Retrieval Quality Baseline', () => {
   });
 });
 
+// ─── PHASE 5 SESSION A: RETRIEVAL GAP TESTS ────────────────────────────────
+
+describe('Phase 5 Session A: Retrieval Gap Tests', () => {
+
+  it('audit API route for multi-tenant isolation and security compliance', skipIfNoDb(async () => {
+    const results = await searchBrain('audit API route for multi-tenant isolation and security compliance');
+    assertNonEmpty(results, 'audit API route multi-tenant');
+    assertRetrievedAny(results, [
+      'e1', 'e2', 'tenant', 'isolation', 'companyid', 'rls', 'security boundary'
+    ], 'audit API route multi-tenant');
+  }));
+
+  it('multi-tenant isolation companyId every table server injects', skipIfNoDb(async () => {
+    const results = await searchBrain('multi-tenant isolation companyId every table server injects');
+    assertNonEmpty(results, 'multi-tenant companyId');
+    assertRetrievedAny(results, [
+      'companyid', 'tenant', 'isolation', 'rls', 'e2', 'ownership'
+    ], 'multi-tenant companyId');
+  }));
+
+  it('enterprise production standard E1 E5 E14 non-negotiable baseline', skipIfNoDb(async () => {
+    const results = await searchBrain('enterprise production standard E1 E5 E14 non-negotiable baseline');
+    assertNonEmpty(results, 'enterprise E1 E5 E14');
+    assertRetrievedAny(results, [
+      'e1', 'e5', 'e14', 'enterprise', 'security boundary', 'non-deferrable'
+    ], 'enterprise E1 E5 E14');
+  }));
+
+  it('security-gaps-to-fix locked document', skipIfNoDb(async () => {
+    const results = await searchBrain('security-gaps-to-fix locked document suspended company rate limit');
+    assertNonEmpty(results, 'security-gaps-to-fix');
+    assertRetrievedAny(results, [
+      'gap', 'security', 'suspended', 'company.status', 'rate limit'
+    ], 'security-gaps-to-fix');
+  }));
+});
+
 describe('Phase 0: Brain Health Check', () => {
   it('brain connection is available', skipIfNoDb(async () => {
     assert.ok(isConnected(), 'Brain should be connected after loadRealImpactCheck');
