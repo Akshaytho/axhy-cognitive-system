@@ -356,13 +356,14 @@ When impactCheck returns empty or sparse results for a given intent:
 Reduced from 9 steps to 5:
 
 1. **Run audit** — `pnpm --filter @axhy/ai-tools run audit` (unchanged)
-2. **Run brain:build if needed** — only if new docs/learnings exist since last build
-3. **Book health check:**
-   - Verify brain has entries for: locked docs, feedback files, learnings
-   - Verify digest freshness (source_hash matches current files)
-   - If empty categories or stale digests: warn and fix (rebuild or regenerate)
+2. **Run brain:build (unconditional)** — `export $(grep OPENAI_API_KEY apps/backend/.env.local) && FIELD_FANOUT_ENABLED=true railway run --service Postgres -- pnpm --filter @axhy/ai-tools brain:build`. The builder is idempotent: it SHA-256-hashes every scanned file and short-circuits to "unchanged" when nothing has moved. A typical no-new-doc run costs ~3 seconds and zero OpenAI calls. **Do not gate this step on a heuristic about what changed** — trust the tool, not the model's judgment. Skip only if Railway/OpenAI env is genuinely unavailable, and surface that fact in the boot summary explicitly.
+3. **Book health check (produce fresh artifact)** — `railway run --service Postgres -- npm run test:brain-health`. Quote the script's summary line verbatim ("Summary: N checks — X passed, Y failed, Z warnings") in the boot summary. If the script cannot run (env missing, DB unreachable, known script bug), state that explicitly and fall back to a manual MCP `impact_search` against 3-5 representative queries with the result snapshot quoted verbatim. **Never substitute prior-session memory or session-retrospective observations for current external-state claims.**
 4. **Read handoff** — STATUS.md + NEXT_SESSION.md
-5. **Summarize** — where we left off + what's next
+5. **Summarize** — where we left off + what's next, including the verbatim brain-health summary from step 3 and any step-2 deviation.
+
+**Discipline rule (codified from 2026-05-26 boot failure):** The boot summary may never cite a prior-session observation about external state (DB contents, test pass/fail counts, deploy status, brain content gaps) as current truth. External state can only be reported by re-running the check now. Past observations are context for *understanding* the system, not *evidence* for claims about its present state. A memory-cited external-state fact in a boot summary without a corresponding fresh check is a discipline violation regardless of whether the fact happens to still be accurate. The audit pattern lives in `docs/learnings/2026-05-26-all-boot-stale-memory-citation.md`.
+
+**Known operational gap:** `scripts/brain-health-preflight.mjs` is invoked via plain `node` in the current `test:brain-health` npm script, which prevents it from importing the `.ts` adapter modules and produces a false-negative "Could not connect to brain DB". The script must be updated to use `tsx` before step 3 is fully operational. Until fixed, step 3 uses the manual MCP `impact_search` fallback described above.
 
 **Identity is already hot via:**
 - CLAUDE.md (auto-loaded by Claude Code at session start)
