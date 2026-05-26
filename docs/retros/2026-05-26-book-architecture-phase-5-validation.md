@@ -317,11 +317,130 @@ The brain surfaced open questions from **multiple spec/handoff docs** (SUPERVISO
 
 **Session C: CLEAN PASS**
 
+### Founder Notes (9.4/10)
+
+Most important validation — proves the lighter boot did not make Claude treat the digest as truth. Claude did the right sequence: digest first, remembered it's navigation, used impactCheck for details, did not open the full 60K plan unnecessarily, did not re-debate locked decisions.
+
+Source-of-truth hierarchy confirmed:
+- Derived docs are useful evidence
+- Digest is navigation
+- Full master plan is source truth for exact master-plan decisions
+- Locked docs decide where applicable
+
+The one small note: open questions came from derived specs, not directly from §H. Acceptable for audits, but for implementation decisions, exact §H wording may still need a single full-plan lookup.
+
 ---
 
 ## Session D: Bugfix / Refactor
 
-**Status:** Pending
+**Task:** Fix the timer.tsx tap-target gap found in Session B — back button lacks explicit `minHeight: tokens.tap.minMobile`. Small, concrete refactor that tests whether Claude carries forward findings from earlier sessions and follows bug-prevention discipline.
+
+### Pre-Session Checklist
+
+**What this validates:**
+The lighter boot still retrieves past learnings, bug-prevention discipline, and UX rules when performing a small bugfix/refactor. This is the most common day-to-day task type — fixing small issues found during audits.
+
+**Expected impactCheck queries:**
+1. `tap-target 48pt minimum mobile button accessibility` — should surface: UX constraints (48pt minMobile), worker cognitive load, accessibility rules
+2. `timer screen cleaning worker capture flow` — should surface: timer.tsx context, wake-lock rules, capture flow structure
+
+**Expected learnings / locked docs / bug-prevention rules the brain must surface:**
+- `tokens.tap.minMobile = 48` — the specific token value
+- UX constraints: 48pt tap targets minimum, one-handed reachability
+- Worker cognitive load: fewer screens, bigger buttons
+- Enterprise standard: check_before_edit required before any file modification
+
+**Expected guardrails:**
+- `check_before_edit` must fire and approve before editing timer.tsx
+- No `check_before_build` needed (this is a fix, not a new feature)
+- Full test suite must remain green after the fix
+
+**Expected tests:**
+- No new tests needed (this is a style/compliance fix, not a behavior change)
+- Existing test suite (469 pass) must remain green
+- TypeScript must still compile
+
+**Pass criteria:**
+- Brain surfaces tap-target rule and timer.tsx context without preloaded memory
+- check_before_edit fires and approves the edit
+- Fix is minimal: add `minHeight: tokens.tap.minMobile` to backBtn style in timer.tsx
+- Full test suite still green after fix
+- No guardrail bypasses needed
+
+**Failure signs (critical regression):**
+- Brain fails to surface tap-target rule
+- check_before_edit does not fire or is bypassed
+- Fix breaks existing tests
+- `_embedding_mode: "fake"` on any query
+
+**Failure signs (minor regression):**
+- Brain surfaces tap-target rule but not the specific `tokens.tap.minMobile` value
+- Need more than one query to find the relevant UX constraint
+
+### Execution Results
+
+**Query 1 — tap-target 48pt minimum mobile button accessibility (scores 0.42-0.57):**
+| Result | Score | What it surfaced |
+|--------|-------|-----------------|
+| Spacing 4px grid | 0.57 | `space.9 (48px) = minimum mobile tap target` — exact token value |
+| UX constraints | 0.52 | `tokens.tap.minMobile = 48`, one-handed reachability lower-right 60% |
+| Reachability cones | 0.49 | Bottom-right 60% safe zone, primary CTAs must be there |
+| Button styles | 0.44 | Decision card button pattern with padding/borderRadius |
+
+**Query 2 — timer screen cleaning worker capture flow (scores 0.47-0.54):**
+| Result | Score | What it surfaced |
+|--------|-------|-----------------|
+| CRIT-4: Timer state not persisted | 0.54 | Known bug — elapsed time lost on accidental back-press |
+| Keep device awake feedback | 0.50 | Wake-lock mandatory on timer, camera, QR, review |
+| Task 7: Mobile timer screen | 0.49 | Exact file reference: `apps/mobile/app/(worker)/capture/[visitId]/timer.tsx` |
+| Day 2 capture flow | 0.49 | 8-screen capture flow structure |
+
+All queries: `_embedding_mode: "real"`.
+
+### Guardrail Behavior
+
+1. **check_before_edit first attempt:** Rejected with `requires_answer: true` — guardrail correctly detected file not read recently enough. Asked: "What is the current content of timer.tsx?"
+2. **Re-read files:** Read timer.tsx lines 147-174 and submit.tsx lines 230-254 to confirm current state.
+3. **Guardrail warning:** "Bug fix: before applying this fix, grep/search all files in the same architecture for the same pattern. Repeated bugs often exist in multiple files. Fix all instances together." — followed this advice and added submit.tsx to the fix scope.
+4. **check_before_edit second attempt:** Approved for both files with evidence of re-read and sibling file pattern.
+
+This demonstrates the guardrail system working correctly under the lighter boot — it challenged stale context, required evidence, and gave useful tactical advice about repeated patterns.
+
+### Fix Applied
+
+| File | Line | Change |
+|------|------|--------|
+| timer.tsx | 160 | Added `minHeight: tokens.tap.minMobile` to backBtn style |
+| submit.tsx | 243 | Added `minHeight: tokens.tap.minMobile` to backBtn style |
+
+Pattern matches existing compliant files: PhasePhotoCapture.tsx line 207, review.tsx line 85.
+
+### Verification
+
+| Check | Result |
+|-------|--------|
+| TypeScript compile | Clean (zero errors) |
+| Cognitive system tests | 469 pass, 0 fail, 22 skip |
+| No guardrail bypasses | Confirmed — check_before_edit fired twice, approved on second with evidence |
+
+### Checklist Evaluation
+
+| Criterion | Result |
+|-----------|--------|
+| Brain surfaces tap-target rule | PASS — exact value `tokens.tap.minMobile = 48` at score 0.57 |
+| Brain surfaces timer.tsx context | PASS — CRIT-4 and Task 7 with exact file reference |
+| check_before_edit fires and approves | PASS — challenged once (file not read), approved on re-read |
+| Fix is minimal and correct | PASS — one additive property per file |
+| Tests remain green | PASS — 469/0/22 |
+| `_embedding_mode: "real"` | PASS |
+| No guardrail bypasses | PASS |
+
+**Critical regressions:** None.
+**Minor regressions:** None.
+
+### Verdict
+
+**Session D: CLEAN PASS**
 
 ---
 
