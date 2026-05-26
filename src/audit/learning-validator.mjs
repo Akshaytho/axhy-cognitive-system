@@ -65,8 +65,8 @@ export function validatePatternReach(learningPath, repoRoot) {
     } catch {}
   }
 
-  if (matchCount === 0 && expect !== 'exists') {
-    return { valid: false, reason: `Pattern '${pattern}' matches 0 files — may be fake`, matchCount };
+  if (matchCount === 0 && expect === 'exists') {
+    return { valid: false, reason: `Pattern '${pattern}' expected to exist but matches 0 files`, matchCount };
   }
   if (matchCount > 30) {
     return { valid: false, reason: `Pattern '${pattern}' matches ${matchCount} lines — too broad`, matchCount };
