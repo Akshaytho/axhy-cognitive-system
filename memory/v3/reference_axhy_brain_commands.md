@@ -39,21 +39,55 @@ Both halves work together: learnings written by audit failures get embedded by b
 
 | User says | Command | What it does |
 |---|---|---|
-| "start axhy brain" / "turn on axhy brain" / "build brain" / "update brain" / "embed brain" | `railway run -- pnpm --filter @axhy/ai-tools brain:build` | Embeds all docs into pgvector. Run when new docs added. ~30s. |
+| "start axhy brain" / "turn on axhy brain" / "build brain" / "update brain" / "embed brain" | See brain:build command below | Embeds all docs into pgvector with real OpenAI embeddings. Run when new docs added. ~46 min with field fanout. |
 | (automatic on session start per CLAUDE.md) | `pnpm --filter @axhy/ai-tools run audit` | Local grep checks. Runs automatically. ~5s. |
 | "compact brain" | `pnpm --filter @axhy/ai-tools brain:compact` | Compresses old/duplicate chunks |
 | "seed locked docs" | `pnpm --filter @axhy/ai-tools brain:lock-seed` | Seeds locked doc embeddings specifically |
 
 **Critical:** When user says "start axhy brain", run `brain:build` via Railway — NOT `audit`. Audit is separate and automatic.
 
-## Why `railway run --` is mandatory (not optional)
+## The correct brain:build command
+
+```bash
+export $(grep OPENAI_API_KEY /Users/thotaakshay/eclean_workspace/axhy-v3/apps/backend/.env.local) && \
+  FIELD_FANOUT_ENABLED=true railway run --service Postgres -- \
+  pnpm --filter @axhy/ai-tools brain:build
+```
+
+This command requires THREE things:
+1. **OPENAI_API_KEY** from `apps/backend/.env.local` — for real OpenAI embeddings
+2. **DATABASE_PUBLIC_URL** from Railway Postgres service (`--service Postgres`) — for external DB access
+3. **FIELD_FANOUT_ENABLED=true** — splits docs into section-level embeddings for precise retrieval
+
+**Why all three are required:**
+- Railway Postgres service gives `DATABASE_PUBLIC_URL` (external hostname) but does NOT have `OPENAI_API_KEY`
+- Railway default service has `OPENAI_API_KEY` but its `DATABASE_URL` uses `postgres.railway.internal` (internal-only, unreachable from local)
+- Without `FIELD_FANOUT_ENABLED`, large docs (like Enterprise Production Standard) are embedded as one averaged vector, too vague for specific queries
+- You must source from BOTH services + enable field fanout
+
+## DANGER: Fake embeddings (Phase 0 discovery, 2026-05-26)
+
+If `OPENAI_API_KEY` is missing from the environment, the `embed()` function in `brain-builder.ts` (line 118) **silently falls back to PRNG-based fake vectors**. These are deterministic hashes, NOT semantic embeddings. The brain will appear to work (entries are created, no errors) but retrieval is random noise — cosine similarity between any two texts is ~0.08 (essentially zero).
+
+**This is not hypothetical.** Before 2026-05-26, every brain:build ran with `railway run --service Postgres` which lacked the API key. All embeddings were fake. Tests that passed were passing by keyword coincidence in random top-10 results, not semantic retrieval.
+
+**How to verify real embeddings:** Run the retrieval quality tests:
+```bash
+export $(grep OPENAI_API_KEY /Users/thotaakshay/eclean_workspace/axhy-v3/apps/backend/.env.local) && \
+  cd /Users/thotaakshay/eclean_workspace/axhy-cognitive-system && \
+  railway run --service Postgres -- \
+  /Users/thotaakshay/eclean_workspace/axhy-v3/packages/ai-tools/node_modules/.bin/tsx \
+  --test tests/retrieval-quality.test.mjs
+```
+All 15 tests must pass. If any fail, the brain may have fake embeddings.
+
+## Why `railway run --service Postgres` is mandatory
 
 The database URL uses `postgres.railway.internal` — an internal DNS name that **only resolves inside Railway's network**. Your laptop is outside that network.
 
-- `railway run -- pnpm ...brain:build` → Railway CLI proxies the connection through its network. **Works.**
-- `pnpm ...brain:build` (no prefix) → tries to resolve `postgres.railway.internal` from your laptop → **DNS fails, build fails silently.**
-
-**This is not a nice-to-have. Without `railway run --`, the brain cannot connect to the database. Period.**
+- `railway run --service Postgres -- pnpm ...brain:build` → gets `DATABASE_PUBLIC_URL` (external hostname). **Works.**
+- `railway run -- pnpm ...brain:build` → gets `DATABASE_URL` with internal hostname → **DNS fails from local.**
+- `pnpm ...brain:build` (no prefix) → no DB URL at all → **fails silently.**
 
 If `railway` CLI is not in PATH, use the full path: `~/.railway/bin/railway run -- ...`
 If `pnpm` is not in PATH, use: `/Users/thotaakshay/.nvm/versions/node/v20.20.1/bin/npx pnpm ...`
