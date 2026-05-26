@@ -97,11 +97,12 @@ When working on v3, prefer v3 memory. v1/v2 memory has been cleaned of contradic
   3. Read identity layer (WHO you are + HOW you think + WHAT bar you hold):
      - `axhy-cognitive-system/docs/CORE_MIND.md` — temperament, maturity modes, session-end reflection, learning lifecycle, right/wrong contract
      - `axhy-cognitive-system/docs/locked/ENTERPRISE_PRODUCTION_STANDARD.md` — E1-E14 non-negotiable production baseline (wake-lock safety, documentation truth, non-deferrable categories)
-  4. Read v3 memory index (index only, do not follow links): `~/.claude/projects/-Users-thotaakshay-eclean-workspace/memory/v3/MEMORY_V3.md`
-  5. Read the boot digest: `axhy-cognitive-system/docs/BOOT_DIGEST.md` — universal rules at-a-glance. The full 19 feedback files and 3309-line master plan are embedded in the brain; call `impactCheck("plain English description of task")` to surface relevant content on demand. Read individual files only when impactCheck points there or you're about to violate a rule and need exact wording.
-  6. Read handoff: `axhy-v3/handoff/NEXT_SESSION.md` + `axhy-v3/handoff/STATUS.md`
-  7. Acknowledge the 4 hard discipline gates (plan mode + panel, spec coverage matrix, adversarial panel, playwright + panel review)
-  8. Summarize where we left off + what's next
+  4. Read failure fingerprint: `axhy-cognitive-system/docs/boot/AXHY_FAILURE_FINGERPRINT.md` — behavioral awareness of recurring failure patterns from prior sessions
+  5. Read v3 memory index (index only, do not follow links): `~/.claude/projects/-Users-thotaakshay-eclean-workspace/memory/v3/MEMORY_V3.md`
+  6. Read the boot digest: `axhy-cognitive-system/docs/BOOT_DIGEST.md` — universal rules at-a-glance. The full 19 feedback files and 3309-line master plan are embedded in the brain; call `impactCheck("plain English description of task")` to surface relevant content on demand. Read individual files only when impactCheck points there or you're about to violate a rule and need exact wording.
+  7. Read handoff: `axhy-v3/handoff/NEXT_SESSION.md` + `axhy-v3/handoff/STATUS.md`
+  8. Acknowledge the 4 hard discipline gates (plan mode + panel, spec coverage matrix, adversarial panel, playwright + panel review)
+  9. Summarize where we left off + what's next
   - **Brain command reference is cold.** Read it only when doing brain operations: `~/.claude/projects/-Users-thotaakshay-eclean-workspace/memory/v3/reference_axhy_brain_commands.md`. Never run brain:build without OPENAI_API_KEY + FIELD_FANOUT_ENABLED=true + Railway Postgres env.
 - If user says "load v3" or "resume v3" or "where did we leave off?" → read the master plan digest (`axhy-cognitive-system/docs/book/digests/MASTER_PLAN_DIGEST.md`) + v3 memory index. The digest covers iteration locks and open questions; use `impactCheck("open questions")` for exact §H details. (Does NOT run brain:build — use "load axhy system" for the full boot.)
 - If user's first message matches a cheat-sheet trigger, execute that skill/tool directly.

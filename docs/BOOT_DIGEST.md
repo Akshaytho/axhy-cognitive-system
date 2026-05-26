@@ -68,6 +68,10 @@ Skills install at user scope (`~/.claude/`) only. NEVER inside the project repo'
 
 User knows OpenAI + Railway keys are leaked and rotates on their own schedule. Do not surface this repeatedly.
 
+## Evidence discipline
+
+Imagination proposes. Evidence decides. Every important claim must declare its evidence type, freshness, assumptions, and cheapest verification path. Claims without evidence are labelled as such and cannot drive decisions. Full framework: `impactCheck("evidence decision card")`.
+
 ## When to read full files (not boot)
 
 Read the full master plan section, feedback file, or locked doc when:
@@ -79,4 +83,4 @@ Otherwise, this digest is enough.
 
 ---
 
-*Last refreshed: 2026-05-25. If feedback files change, regenerate this digest by skimming the new `## name:` headlines and updating the rule lines above. The brain handles semantic search; this file handles boot-time orientation.*
+*Last refreshed: 2026-05-26. If feedback files change, regenerate this digest by skimming the new `## name:` headlines and updating the rule lines above. The brain handles semantic search; this file handles boot-time orientation.*
