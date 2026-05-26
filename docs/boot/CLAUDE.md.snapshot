@@ -89,7 +89,7 @@ When working on v3, prefer v3 memory. v1/v2 memory has been cleaned of contradic
 
 ## Default behavior
 
-- **On session start, run the audit first:** `pnpm --filter @axhy/ai-tools run audit` (or `packages/ai-tools/node_modules/.bin/tsx packages/ai-tools/src/session-audit.ts`). If BLOCKERS found → fix before ANY work. If HIGH found → fix before committing. Then read the master plan digest + v3 memory (use impactCheck for deeper master plan content as needed).
+- **On session start, run the audit first:** `pnpm --filter @axhy/ai-tools run audit` (or `packages/ai-tools/node_modules/.bin/tsx packages/ai-tools/src/session-audit.ts`). If BLOCKERS found → fix before ANY work. If HIGH found → fix before committing. Then read the master plan digest + v3 memory index (use impactCheck for deeper master plan content as needed). Do not preload individual memory files — the brain handles retrieval.
 - **"Start axhy brain" / "build brain" / "update brain" = `brain:build`, NOT audit.** These are TWO DIFFERENT commands:
   - `audit` = local grep checks, no DB needed, runs automatically on session start (the line above)
   - `brain:build` = embeds docs into pgvector (the AI's long-term memory). Command: `export $(grep OPENAI_API_KEY apps/backend/.env.local) && FIELD_FANOUT_ENABLED=true railway run --service Postgres -- pnpm --filter @axhy/ai-tools brain:build`. Requires both Railway DB (for DATABASE_PUBLIC_URL) and OPENAI_API_KEY (for real embeddings). **Do not run brain:build with Railway Postgres alone — it provides DATABASE_PUBLIC_URL but not OPENAI_API_KEY, which causes fake PRNG embeddings.** Run when user asks to start/build/update the brain, or when new docs (specs, learnings, locked docs) need embedding.
@@ -101,13 +101,13 @@ When working on v3, prefer v3 memory. v1/v2 memory has been cleaned of contradic
   3. Read identity layer (WHO you are + HOW you think + WHAT bar you hold):
      - `axhy-cognitive-system/docs/CORE_MIND.md` — temperament, maturity modes, session-end reflection, learning lifecycle, right/wrong contract
      - `axhy-cognitive-system/docs/locked/ENTERPRISE_PRODUCTION_STANDARD.md` — E1-E14 non-negotiable production baseline (wake-lock safety, documentation truth, non-deferrable categories)
-  4. Read the axhy brain reference (what the brain IS, how it works, the self-improving loop, all commands): `~/.claude/projects/-Users-thotaakshay-eclean-workspace/memory/v3/reference_axhy_brain_commands.md`
-  5. Read v3 memory index: `~/.claude/projects/-Users-thotaakshay-eclean-workspace/memory/v3/MEMORY_V3.md`
-  6. Read the boot digest: `axhy-cognitive-system/docs/BOOT_DIGEST.md` — universal rules at-a-glance. The full 19 feedback files and 3309-line master plan are embedded in the brain; call `impactCheck("plain English description of task")` to surface relevant content on demand. Read individual files only when impactCheck points there or you're about to violate a rule and need exact wording.
-  7. Read handoff: `axhy-v3/handoff/NEXT_SESSION.md` + `axhy-v3/handoff/STATUS.md`
-  8. Acknowledge the 4 hard discipline gates (plan mode + panel, spec coverage matrix, adversarial panel, playwright + panel review)
-  9. Summarize where we left off + what's next
-- If user says "load v3" or "resume v3" or "where did we leave off?" → read the master plan digest (`axhy-cognitive-system/docs/book/digests/MASTER_PLAN_DIGEST.md`) + v3 memory + summarize the ~22 open questions in `v3_open_questions.md`. Use `impactCheck` for specific master plan details as needed. (Does NOT run brain:build — use "load axhy system" for the full boot.)
+  4. Read v3 memory index (index only, do not follow links): `~/.claude/projects/-Users-thotaakshay-eclean-workspace/memory/v3/MEMORY_V3.md`
+  5. Read the boot digest: `axhy-cognitive-system/docs/BOOT_DIGEST.md` — universal rules at-a-glance. The full 19 feedback files and 3309-line master plan are embedded in the brain; call `impactCheck("plain English description of task")` to surface relevant content on demand. Read individual files only when impactCheck points there or you're about to violate a rule and need exact wording.
+  6. Read handoff: `axhy-v3/handoff/NEXT_SESSION.md` + `axhy-v3/handoff/STATUS.md`
+  7. Acknowledge the 4 hard discipline gates (plan mode + panel, spec coverage matrix, adversarial panel, playwright + panel review)
+  8. Summarize where we left off + what's next
+  - **Brain command reference is cold.** Read it only when doing brain operations: `~/.claude/projects/-Users-thotaakshay-eclean-workspace/memory/v3/reference_axhy_brain_commands.md`. Never run brain:build without OPENAI_API_KEY + FIELD_FANOUT_ENABLED=true + Railway Postgres env.
+- If user says "load v3" or "resume v3" or "where did we leave off?" → read the master plan digest (`axhy-cognitive-system/docs/book/digests/MASTER_PLAN_DIGEST.md`) + v3 memory index. The digest covers iteration locks and open questions; use `impactCheck("open questions")` for exact §H details. (Does NOT run brain:build — use "load axhy system" for the full boot.)
 - If user's first message matches a cheat-sheet trigger, execute that skill/tool directly.
 - Never re-debate locked decisions in master plan §G. Open questions are in §H.
 - **Before any non-trivial task**, run the Self-Reasoning Protocol (`axhy-v3/docs/protocols/self-reasoning.md`). This means: question yourself, search the vector DB via `impactCheck()`, verify assumptions against code, project what breaks, compare routes — THEN execute. Skip only for trivial typo/comment fixes or when founder says "just do it".
