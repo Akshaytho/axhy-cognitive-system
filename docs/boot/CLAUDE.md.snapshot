@@ -1,7 +1,7 @@
-<!-- This is the Phase 2 active workspace CLAUDE.md snapshot.
+<!-- This is the Phase 4 active workspace CLAUDE.md snapshot.
      Source file lives at eclean_workspace/CLAUDE.md and is not git-tracked.
-     Snapshot taken: 2026-05-26, after Phase 2 Book Architecture migration.
-     Change: master-plan preload replaced with digest navigation.
+     Snapshot taken: 2026-05-26, after Phase 4 Book Architecture migration.
+     Change: hot/cold split — compressed methodology, skill workflows, anti-patterns.
      If the local CLAUDE.md is lost or overwritten, restore from this file. -->
 
 # Axhy workspace — auto-loaded context (v3 era)
@@ -90,11 +90,7 @@ When working on v3, prefer v3 memory. v1/v2 memory has been cleaned of contradic
 ## Default behavior
 
 - **On session start, run the audit first:** `pnpm --filter @axhy/ai-tools run audit` (or `packages/ai-tools/node_modules/.bin/tsx packages/ai-tools/src/session-audit.ts`). If BLOCKERS found → fix before ANY work. If HIGH found → fix before committing. Then read the master plan digest + v3 memory index (use impactCheck for deeper master plan content as needed). Do not preload individual memory files — the brain handles retrieval.
-- **"Start axhy brain" / "build brain" / "update brain" = `brain:build`, NOT audit.** These are TWO DIFFERENT commands:
-  - `audit` = local grep checks, no DB needed, runs automatically on session start (the line above)
-  - `brain:build` = embeds docs into pgvector (the AI's long-term memory). Command: `export $(grep OPENAI_API_KEY apps/backend/.env.local) && FIELD_FANOUT_ENABLED=true railway run --service Postgres -- pnpm --filter @axhy/ai-tools brain:build`. Requires both Railway DB (for DATABASE_PUBLIC_URL) and OPENAI_API_KEY (for real embeddings). **Do not run brain:build with Railway Postgres alone — it provides DATABASE_PUBLIC_URL but not OPENAI_API_KEY, which causes fake PRNG embeddings.** Run when user asks to start/build/update the brain, or when new docs (specs, learnings, locked docs) need embedding.
-  - The axhy brain is the self-improving AI memory system: vector DB stores docs as embeddings → `impactCheck()` searches them semantically → learnings from past mistakes get embedded → the AI remembers and improves every session, independent of context window limits.
-  - **Never confuse the two.** Audit is the immune system (catches violations). Brain:build is the memory (stores knowledge). Both matter, but they are separate commands for separate purposes.
+- **"Start axhy brain" / "build brain" = `brain:build` (boot step 2), NOT audit.** Audit = local grep checks (automatic). Brain:build = embed docs into pgvector. Never run brain:build without OPENAI_API_KEY + FIELD_FANOUT_ENABLED=true + Railway Postgres env.
 - **"Load axhy system" / "load everything" / "boot up"** → do ALL of these in order:
   1. Run audit: `pnpm --filter @axhy/ai-tools run audit`
   2. Run brain:build: `export $(grep OPENAI_API_KEY apps/backend/.env.local) && FIELD_FANOUT_ENABLED=true railway run --service Postgres -- pnpm --filter @axhy/ai-tools brain:build` (exports OPENAI_API_KEY for real embeddings + uses `--service Postgres` for DATABASE_PUBLIC_URL — both are required; Railway alone gives DB but not the API key)
@@ -119,74 +115,27 @@ When working on v3, prefer v3 memory. v1/v2 memory has been cleaned of contradic
 - **Real-world reasoning only.** Ground every feature in a concrete cleaning company situation.
 - **Lock then move forward.** Don't reopen settled decisions without strong evidence.
 - **Ship the magic.** Cutting per-user docs, AI onboarding, voice capture, AI verification = generic product = no customers.
-- **Self-reason before executing.** Run the 7-phase protocol (`axhy-v3/docs/protocols/self-reasoning.md`) before writing code. Phase 2 uses `impactCheck()` from `@axhy/ai-tools` to surface locked constraints and stale docs. If impactCheck returns hardBlocks → STOP and surface to founder. If it returns staleChunks → verify against current code before trusting those docs.
-- **Two-tier truth.** Locked docs override code (code that contradicts a locked doc is a bug). If the lock itself is wrong: update the doc → re-lock → THEN change code. Unlocked docs follow code (auto-staled when code changes).
-- **AI Behavioral Contract (12 docs).** `axhy-v3/docs/locked/` contains 12 focused constitutional docs covering: chat-behavior-rules, chat-sidebar-context-flow, rule-hierarchy-three-layers, livingdoc-extraction-rules, chat-abuse-prevention, chat-tools-and-decisions, chat-error-scenarios, development-code-standards, development-anti-cheating, security-gaps-to-fix, operational-invariants, verification-checklists. Each doc has a sharp embedding in the vector DB. Any session touching chat, sidebar, rules, LivingDoc, Policy, budget, or AI behavior MUST check these docs via impactCheck.
-- **Self-improving learning loop.** When a pre-commit audit blocks a commit for violating a locked doc rule, Claude Code MUST:
-  1. Fix the violation.
-  2. Write a learning file in `axhy-v3/docs/learnings/` (see `docs/learnings/README.md` for template). The learning explains what rule was broken, WHY it was broken (root cause), and what new prevention rule stops it next time.
-  3. Commit the fix + learning together. The commit message MUST include "Learning:" or "Broke rule:" — the `commit-msg` hook enforces this.
-  4. On next `brain:build`, the learning gets embedded with the correct persona tag (read from frontmatter).
-  5. On next session, `impactCheck` surfaces the learning BEFORE the same mistake repeats.
-  Learnings never delete. They accumulate. Newer learnings override older ones on contradictions. They supplement locked docs, never override them.
+- **Self-reason before executing.** impactCheck hardBlocks → STOP and surface to founder. staleChunks → verify against current code first.
+- **Two-tier truth:** locked docs override code. If code conflicts with a locked doc, stop and surface it. Change the lock first, then code.
+- **AI Behavioral Contract:** 12 constitutional docs in `axhy-v3/docs/locked/`. impactCheck surfaces them when topics match (chat, sidebar, rules, LivingDoc, Policy, budget, AI behavior).
+- **Learning loop:** audit violation → fix + write learning in `axhy-v3/docs/learnings/`. Enforced by commit-msg hook ("Learning:" / "Broke rule:" required). Details: `docs/learnings/README.md`.
 
-## Skill workflows for v3 (automatic — user does not invoke these by name)
+## Skill workflows (mini matrix — full details via impactCheck)
 
-### Intent: "understand X about v3"
-1. **FIRST** check the master plan digest, then use `impactCheck("X")` to surface relevant master plan content from the brain. Open the full master plan (`now-i-think-it-functional-kernighan.md`) only if impactCheck is insufficient or the topic requires exact wording (locked iterations, pricing, open questions).
-2. **IF** X relates to a specific code area in `_archive/codebases/` or `axhy-v3/`, also read those files
-3. **THEN** answer, citing sources (digest section, impactCheck results, or master plan section + file paths)
-
-### Intent: "build X" / "add X" / "create X" (v3 feature)
-1. **FIRST** check master plan §G — is this already locked in an iteration?
-2. **Enterprise preflight:** Run `check_before_build` to declare how E1-E14 enterprise baseline items will be satisfied. Non-deferrable items (security, ownership, crash prevention, data loss, secrets, documentation truth) MUST be addressed — "will handle later" is rejected.
-3. **IF** locked → implement per the lock
-4. **IF** not locked → bring as open question to panel via `superpowers:brainstorming` (panel debate first, founder picks, panel re-critiques, lock, then code)
-5. **AFTER** lock, follow `superpowers:writing-plans` → `superpowers:executing-plans`
-
-### Intent: "fix X" / "debug X" / "<pasted error>" (v3 code)
-1. **FIRST** check master plan §L (bug prevention discipline) for the architectural rule that should have prevented this
-2. **THEN** invoke `superpowers:systematic-debugging` — reproduce + minimise + verify
-3. If bug pattern matches V2's bug treadmill (wrong abstraction), STOP and bring to panel before fixing
-
-### Intent: "refactor X" / "change shape of X" (v3 code)
-1. Check master plan §G — is this changing a locked decision?
-2. If yes → must re-debate with panel + cascade-check other locks
-3. If no → use `superpowers:writing-plans` → `superpowers:executing-plans`
-
-### Intent: "where did we leave off?" / "what's next?" / "what are the open questions?"
-1. Read top of `v3_open_questions.md` — the ~22 open questions
-2. Read top of `v3_iteration_status.md` — what's locked vs not started
-3. Summarise in ≤5 bullets
-
-### Intent: ANY non-trivial task (feature, fix, refactor)
-1. **FIRST** run Self-Reasoning Protocol phases 1–6 (`axhy-v3/docs/protocols/self-reasoning.md`)
-2. Phase 2: `impactCheck("plain English description of what you're about to do")`
-3. If hardBlocks returned → STOP. Show the locked constraint to founder. Do NOT work around it.
-4. If staleChunks returned → verify each against current code (`grep`, `Read`) before trusting
-5. Phase 3–5: follow @derives edges, list assumptions, verify each, project blast radius
-6. Phase 6: if multiple routes exist, compare and pick simplest
-7. **ONLY THEN** write code (Phase 7)
-
-### Intent: "ship / deploy / merge"
-1. Run `superpowers:verification-before-completion` — CI green for ALL packages, real-DB tests, build clean
-2. Run `superpowers:security-review` on the diff
-3. Per master plan §E.5 — verify multi-tenant isolation, no `any` types, no `// TODO` in committed code
-4. Then commit → push → open PR (with founder pre-authorization per `feedback_commit_push_auto_authorized.md`)
+- **Understand X** → digest + `impactCheck("X")`, full master plan only if needed
+- **Feature/build** → check digest/impactCheck for §G, run `check_before_build`, lock before code
+- **Bug/fix** → reproduce, check §L, `superpowers:systematic-debugging`
+- **Refactor** → check if locked decision changes; if yes, re-debate + panel
+- **Ship/deploy** → `superpowers:verification-before-completion` + security review
+- **Where left off** → read handoff (`NEXT_SESSION.md` + `STATUS.md`)
 
 ## Anti-patterns (do NOT do these)
 
-- ❌ Answer "how does X work" without reading the master plan first
-- ❌ Start coding a v3 feature without panel debate + lock
+- ❌ Answer v3 questions without digest or impactCheck first
+- ❌ Start feature without panel debate + lock
 - ❌ Pre-defer features to v3.1 without explicit founder approval
-- ❌ Use SaaS jargon ("synergy", "leverage", "actionable insights") in any UI or comm
 - ❌ Modify anything in `_archive/` (it's frozen reference)
 - ❌ Mix v3 memory entries with v1/v2 MEMORY.md
-- ❌ Re-debate locked decisions in master plan §G
-- ❌ Write code without running impactCheck first (self-reasoning protocol Phase 2)
-- ❌ Trust a stale doc chunk — verify against current code before using it
-- ❌ Work around a locked constraint — if it conflicts, STOP and surface to founder
-- ❌ Fix a pre-commit audit violation without writing a learning file in `docs/learnings/`
 
 ## Escape hatches
 
