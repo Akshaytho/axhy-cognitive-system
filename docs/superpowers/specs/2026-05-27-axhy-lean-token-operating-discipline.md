@@ -1,9 +1,10 @@
 # Phase 7: Lean Token Operating Discipline
 
 **Date:** 2026-05-27
-**Status:** Pending founder review
+**Status:** Founder-approved with 5 corrections (applied below)
 **Authority level:** Spec (not locked, not implemented)
 **Founder review of architect feedback:** 9/10
+**Founder review of this spec:** 8.7/10 (5 corrections applied below)
 **Predecessor:** Phase 6 (Self-Learning Layer + Evidence-Based Evolution)
 **Principle:** Before building memory infrastructure, stop obvious context waste.
 
@@ -67,12 +68,30 @@ This is the number that maps to API billing. cache_read is excluded because it c
 **Context pressure** = what makes the working panel grow:
 
 ```
-context_pressure = cache_read growth rate + turn_count + large_outputs_in_chat
+context_pressure components:
+  avg_cache_read_last_10_turns    (average cache_read per turn over last 10)
+  delta_cache_read_last_10_turns  (change in cache_read from turn N-10 to turn N)
+  turn_count                      (total turns in session)
+  large_outputs_in_chat           (count of tool results > 2000 chars kept in chat)
+  full_file_reads                 (count of Read tool calls)
 ```
 
-This is the number that predicts when a session becomes unwieldy. High context pressure means the next turn re-reads more cached context, tool calls take longer, and compaction risk increases.
+This predicts when a session becomes unwieldy. High context pressure means the next turn re-reads more cached context, tool calls take longer, and compaction risk increases.
 
-### Thresholds (on cost_pressure, not total_processed)
+Even though cache_read is cheap per token, it still reflects working-panel size. A session where cache_read grows fast is heading toward trouble regardless of cost_pressure.
+
+### Context pressure thresholds (provisional — calibrate after 7B)
+
+| Level | avg_cache_read per turn | Action |
+|-------|------------------------|--------|
+| context_green | < 80K/turn | Continue normally. |
+| context_yellow | 80K - 150K/turn | Reduce full-file reads. Prefer line-range reads. |
+| context_orange | 150K - 250K/turn | Write checkpoint. Redirect all large outputs to files. |
+| context_red | > 250K/turn | Finish current task, write handoff, start fresh session. |
+
+**Early-checkpoint rule:** If context_pressure grows fast for 10-15 consecutive turns (delta_cache_read trending upward), write a checkpoint even if cost_pressure is still Green. Do not wait for cost_pressure to catch up — context growth predicts future cost spikes.
+
+### Cost pressure thresholds
 
 | Level | cost_pressure | Action |
 |-------|--------------|--------|
@@ -99,6 +118,7 @@ At any natural boundary:
 - Phase boundary within a multi-phase task
 - After ~50 turns of active work
 - When cost_pressure hits Orange
+- When context_pressure hits context_orange (even if cost_pressure is still Green)
 
 ### Session-end protocol
 
@@ -158,6 +178,18 @@ EVID-033 | grep | requireRole used in 14 route files | full: docs/evidence/2026-
 
 Do not wrap evidence lines in YAML blocks, capsule objects, or structured templates unless the evidence is genuinely complex (multi-part investigation with dependencies). The one-line format is the default.
 
+### Safe evidence-file writing (founder correction 3)
+
+Evidence files must not bypass the guardrail system. Do not pipe tool output directly to files via Bash (`command > docs/evidence/file.md`) unless the guardrail explicitly allows that pattern.
+
+Approved methods for writing evidence files:
+
+1. **Write tool** (preferred) — Use the Write tool after check_before_edit approval. The guardrail tracks file creation and validates intent.
+2. **Sanctioned evidence-capture script** — If Phase 7B creates a token measurement script, it may include an approved evidence-capture helper that writes to `docs/evidence/` with guardrail awareness. This script must be explicitly allowlisted.
+3. **Bash with approved pattern** — If a Bash command naturally produces output (e.g., psql query), capture the result in a variable, then use the Write tool to save it. Do not redirect Bash output directly to tracked directories.
+
+The guardrail system exists to prevent unreviewed file writes. Evidence files are no exception.
+
 ---
 
 ## 4. Guardrail Compact Mode
@@ -192,6 +224,8 @@ Full explanation only when:
 ### Implementation note
 
 This requires changes to the guardrail MCP server response format. It is a separate implementation slice (Phase 7D) that needs its own check_before_build. This spec defines the target; it does not authorize the change.
+
+**Priority escalation (founder correction 4):** If Phase 7B measurement shows guardrail responses are a major context source (e.g., guardrail tool outputs account for >20% of context growth), implement compact mode immediately after 7B — do not wait for 7C validation. Guardrail output was one of the biggest repeated context sources in the 66M session.
 
 ---
 
@@ -260,12 +294,23 @@ For each validation task, record:
 
 ### Success criteria
 
-Phase 7 lean discipline is validated if:
+Phase 7 lean discipline is validated if ALL of the following pass:
 
+**Token criteria:**
 1. F1 and F31 each complete with cost_pressure < 4M (Yellow threshold)
-2. No quality regressions compared to prior heavy sessions
-3. All evidence is captured in files, not lost in chat
+2. context_pressure stays below context_orange for the full session
+3. All large outputs redirected to evidence files (0 large_outputs_in_chat)
 4. Session length stays under ~60 turns
+
+**Quality criteria (founder correction 5):**
+5. All tests pass (no regressions from shorter sessions or evidence redirection)
+6. Guardrails were not bypassed, weakened, or worked around
+7. Evidence files exist for every major investigation and finding
+8. No security or privacy regression (especially critical for F1 and F31)
+9. No missed dependency caused by session boundary
+10. Token reduction does not hide uncertainty — if something is unclear, it must be surfaced, not silenced to keep token count low
+
+A low-token session that misses evidence or hides uncertainty is NOT a success.
 
 ### Failure criteria (triggers deeper infrastructure)
 
@@ -330,11 +375,12 @@ After F1/F31 validation:
 ```
 7A: This spec (write and stop)          ← you are here
 7B: Token measurement tool              ← first code change
-7C: Tool-output discipline              ← behavioral, start using immediately
-7D: Guardrail compact mode              ← separate slice with own preflight
+7C: Tool-output-to-file discipline      ← behavioral, start using immediately
+7D: Guardrail compact mode              ← if 7B shows guardrail output is major source,
+                                           implement before F1/F31 validation
 7E: Short-session policy                ← behavioral, start using immediately
     ↓
-    Validate on F1 + F31
+    Validate on F1 + F31 (token + quality criteria)
     ↓
     Return to product work
     ↓
