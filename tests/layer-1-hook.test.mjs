@@ -137,6 +137,43 @@ describe('Layer 1: PreToolUse Hook (pre-edit-guard)', () => {
     });
   });
 
+  describe('Memory-path scope exemption', () => {
+    it('should ALLOW new .md write to axhy-cognitive-system/memory/ when out of slice scope', () => {
+      writeGuardrailState({ approved_files: ['apps/backend/src/routes/auth.ts'], edits_remaining: 3 });
+      // New file: existsSync returns false → read-recency check skipped per existing fix.
+      // Memory exemption bypasses scope. Result: edit allowed.
+      const result = runGuard({ file_path: 'axhy-cognitive-system/memory/feedback_test_exempt.md' });
+      assert.equal(result.exitCode, 0, `Expected allow, got stderr: ${result.stderr}`);
+    });
+
+    it('should ALLOW new .md write to axhy-v3/docs/learnings/ when out of slice scope', () => {
+      writeGuardrailState({ approved_files: ['apps/backend/src/routes/auth.ts'], edits_remaining: 3 });
+      const result = runGuard({ file_path: 'axhy-v3/docs/learnings/test_learning_exempt.md' });
+      assert.equal(result.exitCode, 0, `Expected allow, got stderr: ${result.stderr}`);
+    });
+
+    it('should ALLOW new .md write to axhy-cognitive-system/docs/retros/ when out of slice scope', () => {
+      writeGuardrailState({ approved_files: ['apps/backend/src/routes/auth.ts'], edits_remaining: 3 });
+      const result = runGuard({ file_path: 'axhy-cognitive-system/docs/retros/2026-05-28-test.md' });
+      assert.equal(result.exitCode, 0, `Expected allow, got stderr: ${result.stderr}`);
+    });
+
+    it('should STILL BLOCK code file out of scope (no over-exemption)', () => {
+      writeGuardrailState({ approved_files: ['apps/backend/src/routes/auth.ts'] });
+      markFileRead('apps/backend/src/routes/attendance.ts');
+      const result = runGuard({ file_path: 'apps/backend/src/routes/attendance.ts' });
+      assert.equal(result.exitCode, 2);
+      assert.match(result.stderr, /not in approved scope/);
+    });
+
+    it('should BLOCK non-.md file in memory path (no code hiding via memory dir)', () => {
+      writeGuardrailState({ approved_files: ['apps/backend/src/routes/auth.ts'] });
+      const result = runGuard({ file_path: 'axhy-cognitive-system/memory/sneaky.js' });
+      assert.equal(result.exitCode, 2);
+      assert.match(result.stderr, /not in approved scope/);
+    });
+  });
+
   describe('Read-before-edit enforcement', () => {
     it('should BLOCK edit when file was not read recently', () => {
       // Use a file that actually exists on disk — the read-check is

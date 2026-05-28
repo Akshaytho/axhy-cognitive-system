@@ -29,6 +29,23 @@ const _timeouts = getTimeouts();
 const APPROVAL_WINDOW_MS = _timeouts.approval_window_ms;
 const DONE_APPROVAL_WINDOW_MS = _timeouts.done_approval_window_ms;
 
+// Memory-path scope exemption.
+// Memory writes are meta-work that AXHY accumulates across slices (feedback,
+// learnings, retros). They bypass the approved_files scope check but still
+// consume one edit from the budget and still pass through audit logging.
+// Only .md files exempt — no code can hide in memory directories.
+const MEMORY_PATH_PREFIXES = [
+  'axhy-cognitive-system/memory/',
+  'axhy-v3/docs/learnings/',
+  'axhy-cognitive-system/docs/retros/',
+];
+
+function isMemoryWrite(absolutePath) {
+  if (typeof absolutePath !== 'string') return false;
+  if (!absolutePath.endsWith('.md')) return false;
+  return MEMORY_PATH_PREFIXES.some(prefix => absolutePath.includes('/' + prefix));
+}
+
 /**
  * Read state from any hash bucket with HMAC verification (C1 fix).
  * Rejects forged, tampered, and unsigned state files.
@@ -185,12 +202,13 @@ async function main() {
     if (normalizedPath === normalizedApproved || normalizedPath.startsWith(normalizedApproved + '/')) return true;
     return normalizedPath.endsWith('/' + approved);
   });
-  if (!fileApproved) {
+  if (!fileApproved && !isMemoryWrite(normalizedPath)) {
     block(
       `⛔ BLOCKED: File not in approved scope.\n` +
       `Approved files: ${approvedFiles.join(', ')}\n` +
       `You tried to edit: ${filePath}\n` +
-      `Call check_before_edit again with this file in your intent.`
+      `Call check_before_edit again with this file in your intent.\n` +
+      `(Memory paths exempt — .md only — under: ${MEMORY_PATH_PREFIXES.join(', ')})`
     );
     return;
   }
