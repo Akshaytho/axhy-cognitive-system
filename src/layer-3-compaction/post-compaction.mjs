@@ -82,7 +82,7 @@ function buildReGrounding() {
   //    expensive failure mode mid-session, and compaction is exactly when
   //    the WHY tends to get summarized away into a forgettable bullet)
   if (visionAnchor) {
-    sections.push('## Why AXHY exists (VISION_ANCHOR.md)');
+    sections.push('## Who I am (VISION_ANCHOR.md)');
     sections.push('');
     sections.push(visionAnchor);
     sections.push('');
