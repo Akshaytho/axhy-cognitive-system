@@ -16,9 +16,10 @@
  * (preserved for backward compat) so the system still boots with something.
  */
 
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { allHashes } from '../shared/config.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const COGNITIVE_ROOT = resolve(__dirname, '..', '..');
@@ -122,7 +123,7 @@ function buildReGrounding() {
   sections.push('- Before any code change, call `check_before_edit` (still required after compact)');
   sections.push('- If brain is offline (impactCheck returns empty), surface to founder before production work');
   sections.push('- Current slice context is in the STATUS section above — verify against actual files before continuing');
-  sections.push('- Read-state from pre-compact sessions does NOT survive — re-Read any file before editing');
+  sections.push('- Read-state is now compact-aware — files read BEFORE this compaction must be re-Read, files read AFTER are trusted');
   sections.push('');
 
   return sections.join('\n');
@@ -144,6 +145,16 @@ async function main() {
   await new Promise((resolve) => {
     process.stdout.write(output, () => resolve());
   });
+
+  // Write compact timestamp marker for the read-cache reflex.
+  // config.mjs:getLastCompactTimestamp() reads this to determine whether
+  // pre-compact file reads are stale. Fan out to all workspace hash buckets
+  // for cross-CWD resilience (same pattern as read-tracker.mjs).
+  const compactMarker = JSON.stringify({ last_compact_at: Date.now() });
+  for (const h of allHashes()) {
+    try { writeFileSync(`/tmp/axhy-${h}-compact-state.json`, compactMarker); } catch {}
+  }
+
   process.exit(0);
 }
 

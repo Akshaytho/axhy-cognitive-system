@@ -1,8 +1,11 @@
-import { describe, it } from 'node:test';
+import { describe, it, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { existsSync, readFileSync, unlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
+import { getWorkspaceRoots } from '../src/shared/config.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const COMPACTION_SCRIPT = join(__dirname, '..', 'src', 'layer-3-compaction', 'post-compaction.mjs');
@@ -56,9 +59,9 @@ describe('Layer 3: PostCompaction Hook — real boot reload', () => {
     assert.ok(result.stdout.length > 2000, `Boot output too short: ${result.stdout.length} chars`);
   });
 
-  it('should warn that read-state does NOT survive compact', () => {
+  it('should describe compact-aware read-state behavior', () => {
     const result = runCompaction('{}');
-    assert.match(result.stdout, /read-state.*does NOT survive|re-Read any file/i);
+    assert.match(result.stdout, /compact-aware|files read.*BEFORE.*compaction/i);
   });
 
   it('should exit 0 even with invalid input', () => {
@@ -96,5 +99,43 @@ describe('PostCompaction module exports', async () => {
     // If main() ran on import, this test process would have produced output
     // by now. Just verifying the import completed.
     assert.ok(true);
+  });
+});
+
+describe('PostCompaction compact-state marker', () => {
+  const REPO_ROOT = dirname(fileURLToPath(import.meta.url));
+  const REPO_HASH = createHash('md5').update(join(REPO_ROOT, '..')).digest('hex').slice(0, 8);
+
+  function allTestHashes() {
+    const set = new Set([REPO_HASH]);
+    for (const r of getWorkspaceRoots()) set.add(createHash('md5').update(r).digest('hex').slice(0, 8));
+    return [...set];
+  }
+
+  afterEach(() => {
+    for (const h of allTestHashes()) {
+      try { unlinkSync(`/tmp/axhy-${h}-compact-state.json`); } catch {}
+    }
+  });
+
+  it('should write compact-state.json with last_compact_at timestamp', () => {
+    const before = Date.now();
+    runCompaction('{}');
+    const after = Date.now();
+
+    // Check at least one hash bucket has the marker
+    let found = false;
+    for (const h of allTestHashes()) {
+      const path = `/tmp/axhy-${h}-compact-state.json`;
+      if (existsSync(path)) {
+        const data = JSON.parse(readFileSync(path, 'utf-8'));
+        assert.ok(typeof data.last_compact_at === 'number', 'last_compact_at should be a number');
+        assert.ok(data.last_compact_at >= before, 'last_compact_at should be >= test start time');
+        assert.ok(data.last_compact_at <= after, 'last_compact_at should be <= test end time');
+        found = true;
+        break;
+      }
+    }
+    assert.ok(found, 'compact-state.json should be written to at least one hash bucket');
   });
 });

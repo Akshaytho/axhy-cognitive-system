@@ -25,7 +25,7 @@ function allHashes() {
 
 function cleanState() {
   for (const h of allHashes()) {
-    for (const suffix of ['guardrail-state.json', 'read-state.json', 'plan-guardrail-state.json', 'done-guardrail-state.json']) {
+    for (const suffix of ['guardrail-state.json', 'read-state.json', 'plan-guardrail-state.json', 'done-guardrail-state.json', 'compact-state.json']) {
       try { unlinkSync(`/tmp/axhy-${h}-${suffix}`); } catch {}
     }
   }
@@ -65,6 +65,22 @@ function markFileRead(filePath) {
   }
   reads[filePath] = Date.now();
   writeFileSync(READ_STATE_FILE, JSON.stringify(reads));
+}
+
+function markFileReadAt(filePath, timestamp) {
+  let reads = {};
+  if (existsSync(READ_STATE_FILE)) {
+    try { reads = JSON.parse(readFileSync(READ_STATE_FILE, 'utf-8')); } catch {}
+  }
+  reads[filePath] = timestamp;
+  writeFileSync(READ_STATE_FILE, JSON.stringify(reads));
+}
+
+function writeCompactMarker(timestamp) {
+  const data = JSON.stringify({ last_compact_at: timestamp });
+  for (const h of allHashes()) {
+    try { writeFileSync(`/tmp/axhy-${h}-compact-state.json`, data); } catch {}
+  }
 }
 
 function runGuard(toolInput) {
@@ -137,6 +153,29 @@ describe('Layer 1: PreToolUse Hook (pre-edit-guard)', () => {
       // Write read state 15 minutes ago (beyond 10-min window)
       const reads = { 'src/layer-1-hook/bash-guard.mjs': Date.now() - 15 * 60 * 1000 };
       writeFileSync(READ_STATE_FILE, JSON.stringify(reads));
+      const result = runGuard({ file_path: 'src/layer-1-hook/bash-guard.mjs' });
+      assert.equal(result.exitCode, 2);
+      assert.match(result.stderr, /haven't Read this file/);
+    });
+
+    it('should ALLOW edit when file was read AFTER compact (compact-aware mode)', () => {
+      writeGuardrailState({ approved_files: ['bash-guard.mjs'] });
+      // Compact happened 5 minutes ago
+      const compactTime = Date.now() - 5 * 60 * 1000;
+      writeCompactMarker(compactTime);
+      // File read 2 minutes ago (AFTER compact)
+      markFileReadAt('src/layer-1-hook/bash-guard.mjs', Date.now() - 2 * 60 * 1000);
+      const result = runGuard({ file_path: 'src/layer-1-hook/bash-guard.mjs' });
+      assert.equal(result.exitCode, 0);
+    });
+
+    it('should BLOCK edit when file was read BEFORE compact (compact-aware mode)', () => {
+      writeGuardrailState({ approved_files: ['bash-guard.mjs'] });
+      // File read 10 minutes ago
+      markFileReadAt('src/layer-1-hook/bash-guard.mjs', Date.now() - 10 * 60 * 1000);
+      // Compact happened 5 minutes ago (AFTER the read)
+      const compactTime = Date.now() - 5 * 60 * 1000;
+      writeCompactMarker(compactTime);
       const result = runGuard({ file_path: 'src/layer-1-hook/bash-guard.mjs' });
       assert.equal(result.exitCode, 2);
       assert.match(result.stderr, /haven't Read this file/);

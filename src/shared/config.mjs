@@ -208,13 +208,50 @@ export function getFileReadTimestamp(filePath) {
 }
 
 /**
- * Check if a file was read within the configured read window.
+ * Read the last compaction timestamp from any hash bucket.
+ * Written by PostCompact hook (layer-3-compaction/post-compaction.mjs).
+ * Returns 0 if no compact has occurred or state file is missing/corrupt.
+ */
+export function getLastCompactTimestamp() {
+  let mostRecent = 0;
+  for (const h of allHashes()) {
+    const candidate = `/tmp/axhy-${h}-compact-state.json`;
+    if (!existsSync(candidate)) continue;
+    try {
+      const data = JSON.parse(readFileSync(candidate, 'utf-8'));
+      const ts = data && typeof data.last_compact_at === 'number' ? data.last_compact_at : 0;
+      if (ts > mostRecent) mostRecent = ts;
+    } catch {}
+  }
+  return mostRecent;
+}
+
+/**
+ * Check if a file was read recently enough to trust its content is in context.
+ *
+ * Compact-aware mode (preferred): if a compaction has occurred this session,
+ * the file must have been read AFTER the last compaction. Content read before
+ * compaction is gone from the AI's working context — a re-read is required.
+ *
+ * Time-window fallback: if no compaction has occurred yet, falls back to the
+ * configured read_window_ms (default 10 min) for backward compatibility.
+ *
  * Used by both L1 (pre-edit-guard) and L2 (server.mjs) for consistency (H7 fix).
  */
 export function wasFileReadRecently(filePath) {
-  const ts = getFileReadTimestamp(filePath);
-  if (!ts) return false;
-  return (Date.now() - ts) < getTimeouts().read_window_ms;
+  const readTs = getFileReadTimestamp(filePath);
+  if (!readTs) return false;
+
+  const compactTs = getLastCompactTimestamp();
+
+  if (compactTs > 0) {
+    // Compact-aware: file must have been read AFTER the last compaction.
+    // Content from before compaction is lost from context.
+    return readTs > compactTs;
+  }
+
+  // No compaction yet this session — fall back to time window.
+  return (Date.now() - readTs) < getTimeouts().read_window_ms;
 }
 
 /**
