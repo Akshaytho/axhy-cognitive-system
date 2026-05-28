@@ -59,6 +59,7 @@ function safeReadTail(filePath, maxLines) {
 }
 
 function buildReGrounding() {
+  const visionAnchor = safeRead(resolve(COGNITIVE_ROOT, 'docs', 'VISION_ANCHOR.md'));
   const coreMind = safeRead(resolve(COGNITIVE_ROOT, 'docs', 'CORE_MIND.md'));
   const bootDigest = safeRead(resolve(COGNITIVE_ROOT, 'docs', 'BOOT_DIGEST.md'));
   const enterpriseStd = safeRead(resolve(COGNITIVE_ROOT, 'docs', 'locked', 'ENTERPRISE_PRODUCTION_STANDARD.md'), 80);
@@ -66,7 +67,7 @@ function buildReGrounding() {
   const nextSession = safeRead(resolve(V3_ROOT, 'handoff', 'NEXT_SESSION.md'), 50);
 
   // If everything fails, fall back to the static reminder.
-  if (!coreMind && !bootDigest && !enterpriseStd && !status && !nextSession) {
+  if (!visionAnchor && !coreMind && !bootDigest && !enterpriseStd && !status && !nextSession) {
     return CORE_REINFORCEMENT;
   }
 
@@ -74,8 +75,18 @@ function buildReGrounding() {
 
   sections.push('# Axhy operational re-grounding (post-compaction)');
   sections.push('');
-  sections.push('You are resuming from a compacted context. The full identity layer + current operational state is loaded below. Read this BEFORE acting on the compact summary alone — the summary describes what happened, this describes WHO you are and WHERE you are.');
+  sections.push('You are resuming from a compacted context. The full identity layer + current operational state is loaded below. Read this BEFORE acting on the compact summary alone — the summary describes what happened, this describes WHY AXHY exists, WHO you are, and WHERE you are.');
   sections.push('');
+
+  // 0. Why am I? (vision-anchor — first because identity drift is the most
+  //    expensive failure mode mid-session, and compaction is exactly when
+  //    the WHY tends to get summarized away into a forgettable bullet)
+  if (visionAnchor) {
+    sections.push('## Why AXHY exists (VISION_ANCHOR.md)');
+    sections.push('');
+    sections.push(visionAnchor);
+    sections.push('');
+  }
 
   // 1. Where am I? (most actionable — read first)
   if (status) {
