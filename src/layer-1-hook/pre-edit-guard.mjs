@@ -38,6 +38,7 @@ const MEMORY_PATH_PREFIXES = [
   'axhy-cognitive-system/memory/',
   'axhy-v3/docs/learnings/',
   'axhy-cognitive-system/docs/retros/',
+  '.claude/projects/-Users-thotaakshay-eclean-workspace/memory/',
 ];
 
 function isMemoryWrite(absolutePath) {
