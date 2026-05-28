@@ -14,11 +14,27 @@ function hasDbUrl() {
   return !!(process.env.DATABASE_URL || process.env.DATABASE_PUBLIC_URL || process.env.AXHY_DB_URL);
 }
 
+const BRAIN_STALE_MARKER = '/tmp/axhy-brain-stale-since.txt';
+
 async function main() {
   if (!hasDbUrl()) {
     log('post-commit', 'No DATABASE_URL set — skipping graph + brain rebuild.');
+    // Loud-not-silent: write a marker file so the next boot can warn that
+    // the brain is behind code. Boot procedure reads this and surfaces a
+    // "BRAIN STALE since commit X — run brain:build before relying on
+    // impact_search" message to the next embodiment.
+    try {
+      const commitSha = execSync('git rev-parse HEAD', { cwd: REPO_ROOT, encoding: 'utf-8' }).trim();
+      writeFileSync(BRAIN_STALE_MARKER, `${Date.now()},${commitSha}\n`);
+      log('post-commit', `Wrote brain-stale marker (${BRAIN_STALE_MARKER}) for commit ${commitSha.slice(0, 7)}.`);
+    } catch (err) {
+      // Marker write failed — don't block commit, just continue. The
+      // silent-skip behavior is preserved as the worst-case fallback.
+    }
     return;
   }
+  // Brain is being rebuilt — clear any stale marker from prior skipped commits.
+  try { unlinkSync(BRAIN_STALE_MARKER); } catch {}
 
   // Write lock file so impact-adapter knows brain is rebuilding
   writeFileSync(BRAIN_LOCK, JSON.stringify({ started: Date.now(), pid: process.pid }));

@@ -191,9 +191,11 @@ export function checkBeforeEdit({
   // Read file content for concurrency analysis in next-question generator.
   // Only read if file exists and is reasonable size (< 500KB).
   let fileContent = null;
+  let fileExists = false;
   try {
     const absPath = primaryFile.startsWith('/') ? primaryFile : resolve(process.cwd(), primaryFile);
-    if (existsSync(absPath)) {
+    fileExists = existsSync(absPath);
+    if (fileExists) {
       const stats = statSync(absPath);
       if (stats.size < 500 * 1024) {
         fileContent = readFileSync(absPath, 'utf-8');
@@ -208,6 +210,7 @@ export function checkBeforeEdit({
     intent,
     riskLevel: risk.level,
     fileWasRead,
+    fileExists,
     testsExist,
     fileContent,
   });

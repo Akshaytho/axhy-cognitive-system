@@ -1,4 +1,4 @@
-export function generateNextQuestion({ filePath, intent, riskLevel, fileWasRead, testsExist, fileContent }) {
+export function generateNextQuestion({ filePath, intent, riskLevel, fileWasRead, fileExists = true, testsExist, fileContent }) {
   const questions = [];
 
   if (riskLevel === 'high') {
@@ -12,7 +12,11 @@ export function generateNextQuestion({ filePath, intent, riskLevel, fileWasRead,
     });
   }
 
-  if (!fileWasRead) {
+  // Only ask "what is the current content?" when the file actually exists on disk.
+  // For net-new file creation (fileExists=false) there is nothing to read — asking
+  // creates a circular loop where the AI is told to read a file that doesn't exist.
+  // fileExists defaults to true so any caller not updating preserves old behavior.
+  if (fileExists && !fileWasRead) {
     questions.push({
       current_uncertainty: 'File has not been read recently — current state unknown.',
       highest_risk_assumption: 'That the file still matches your mental model.',
